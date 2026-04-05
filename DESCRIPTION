@@ -1,0 +1,41 @@
+Package: blockr.portfolio
+Title: Portfolio Management Blocks for blockr
+Version: 0.1.0
+Authors@R:
+    person(given = "Christoph",
+           family = "Sax",
+           role = c("aut", "cre"),
+           email = "christoph@cynkra.com")
+Maintainer: Christoph Sax <christoph@cynkra.com>
+Description: Extends 'blockr.core' with interactive portfolio management and
+    share exploration blocks. Includes an investor profile block, portfolio
+    optimizer, dashboard with rich panel-based visualization, and a share
+    explorer with candlestick charts. Uses echarts4r for all visualizations.
+License: GPL (>= 3)
+Encoding: UTF-8
+Roxygen: list(markdown = TRUE)
+RoxygenNote: 7.3.3
+Imports:
+    blockr.core (>= 0.1.1),
+    blockr.dm,
+    DiagrammeR,
+    dm,
+    DT,
+    echarts4r (>= 0.5.0),
+    htmlwidgets,
+    PerformanceAnalytics,
+    PortfolioAnalytics,
+    quantmod,
+    shiny,
+    stats,
+    utils,
+    xts,
+    zoo
+Suggests:
+    blockr.ai,
+    blockr.dock,
+    ROI,
+    ROI.plugin.quadprog,
+    DEoptim,
+    testthat (>= 3.0.0)
+Config/testthat/edition: 3
