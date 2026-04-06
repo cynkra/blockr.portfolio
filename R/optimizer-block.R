@@ -1,20 +1,21 @@
 #' Portfolio Optimizer Block
 #'
 #' A transform block with two inputs (data dm + investor profile data frame).
-#' Uses the JS-first pattern: single state object flows bidirectionally.
+#' Uses ridge-regularized ROI solver. Per-ticker limits use DEoptim.
 #'
-#' @param state List with strategy, max_weight, max_positions, ticker_limits
+#' @param strategy Optimization strategy
+#' @param max_weight Maximum position weight (NA = no limit)
+#' @param max_positions Maximum ETFs (-1 = auto, NA = off)
+#' @param ticker_limits_json JSON string of per-ticker limits
 #' @param ... Forwarded to [blockr.core::new_transform_block()]
 #'
 #' @return A transform block of class `portfolio_optimizer_block`
 #' @export
 new_portfolio_optimizer_block <- function(
-    state = list(
-      strategy = "mean_variance",
-      max_weight = NA_real_,
-      max_positions = -1L,
-      ticker_limits = list()
-    ),
+    strategy = "mean_variance",
+    max_weight = NA_real_,
+    max_positions = -1L,
+    ticker_limits_json = "{}",
     ...) {
 
   blockr.core::new_transform_block(
@@ -24,12 +25,11 @@ new_portfolio_optimizer_block <- function(
         function(input, output, session) {
           ns <- session$ns
 
-          # Central reactive state
-          r_state <- shiny::reactiveVal(state)
-
-          # Bidirectional sync tracking
-          self_write <- new.env(parent = emptyenv())
-          self_write$active <- FALSE
+          # Individual reactiveVals — blockr.core tracks each one
+          r_strategy <- shiny::reactiveVal(strategy)
+          r_max_weight <- shiny::reactiveVal(max_weight)
+          r_max_positions <- shiny::reactiveVal(max_positions)
+          r_ticker_limits_json <- shiny::reactiveVal(ticker_limits_json)
 
           # Send ticker metadata to JS when data arrives
           shiny::observeEvent(data(), {
@@ -52,62 +52,73 @@ new_portfolio_optimizer_block <- function(
 
           # JS → R: user changed state
           shiny::observeEvent(input$opt_input, {
-            message("[OPT] input$opt_input received: ",
-              paste(utils::capture.output(str(input$opt_input)),
-                collapse = " "))
-            self_write$active <- TRUE
             val <- input$opt_input
-            if (is.list(val)) {
-              # Normalize: convert NA strings, ensure correct types
-              s <- list(
-                strategy = val$strategy %||% "mean_variance",
-                max_weight = if (is.null(val$max_weight) ||
-                  identical(val$max_weight, "null"))
-                  NA_real_ else as.numeric(val$max_weight),
-                max_positions = if (is.null(val$max_positions) ||
-                  identical(val$max_positions, "null"))
-                  NA_integer_ else as.integer(val$max_positions),
-                ticker_limits = if (is.list(val$ticker_limits) &&
-                  length(val$ticker_limits) > 0)
-                  val$ticker_limits else list()
-              )
-              r_state(s)
-            }
-            self_write$active <- FALSE
-          })
+            if (!is.list(val)) return()
 
-          # R → JS: external update (e.g., from AI ctrl)
-          shiny::observeEvent(r_state(), {
-            if (!self_write$active) {
-              session$sendCustomMessage("optimizer-update",
-                list(id = ns("opt_input"), state = r_state()))
+            r_strategy(val$strategy %||% "mean_variance")
+
+            r_max_weight(
+              if (is.null(val$max_weight) ||
+                identical(val$max_weight, "null"))
+                NA_real_ else as.numeric(val$max_weight))
+
+            r_max_positions(
+              if (is.null(val$max_positions) ||
+                identical(val$max_positions, "null"))
+                NA_integer_ else as.integer(val$max_positions))
+
+            tl <- val$ticker_limits
+            if (is.list(tl) && length(tl) > 0) {
+              r_ticker_limits_json(jsonlite::toJSON(
+                tl, auto_unbox = TRUE))
+            } else {
+              r_ticker_limits_json("{}")
             }
           })
 
           list(
             expr = shiny::reactive({
-              s <- r_state()
-              blockr.portfolio:::make_optimizer_expr(
-                s$strategy %||% "mean_variance",
-                s$max_weight,
-                s$max_positions,
-                s$ticker_limits
+              tl_json <- r_ticker_limits_json()
+              tl <- if (nzchar(tl_json) && tl_json != "{}") {
+                jsonlite::fromJSON(tl_json, simplifyVector = FALSE)
+              } else {
+                list()
+              }
+              message("[EXPR] strategy=", r_strategy(),
+                " tl_json=", tl_json,
+                " tl=", paste(names(tl), "=", tl, collapse=", "))
+              make_optimizer_expr(
+                r_strategy(),
+                r_max_weight(),
+                r_max_positions(),
+                tl
               )
             }),
-            state = list(state = r_state)
+            state = list(
+              strategy = r_strategy,
+              max_weight = r_max_weight,
+              max_positions = r_max_positions,
+              ticker_limits_json = r_ticker_limits_json
+            )
           )
         }
       )
     },
     ui = function(id) {
-      # Ensure ticker_limits serializes as {} not []
-      state_for_json <- state
-      if (length(state_for_json$ticker_limits) == 0) {
-        state_for_json$ticker_limits <- structure(list(),
-          names = character(0))
-      }
-      state_json <- jsonlite::toJSON(state_for_json, auto_unbox = TRUE,
-        null = "null", na = "null")
+      init_state <- list(
+        strategy = strategy,
+        max_weight = if (is.na(max_weight)) NULL else max_weight,
+        max_positions = max_positions,
+        ticker_limits = if (nzchar(ticker_limits_json) &&
+          ticker_limits_json != "{}") {
+          jsonlite::fromJSON(ticker_limits_json,
+            simplifyVector = FALSE)
+        } else {
+          structure(list(), names = character(0))
+        }
+      )
+      state_json <- jsonlite::toJSON(init_state, auto_unbox = TRUE,
+        null = "null")
 
       shiny::tagList(
         optimizer_block_dep(),
@@ -125,23 +136,16 @@ new_portfolio_optimizer_block <- function(
       if (!inherits(data, "dm")) {
         stop("First input must be a dm object")
       }
-      tbls <- dm::dm_get_tables(data)
-      if (!all(c("metadata", "returns") %in% names(tbls))) {
-        stop("dm must contain 'metadata' and 'returns' tables")
-      }
       if (!is.data.frame(profile) || nrow(profile) < 1) {
-        stop("Second input must be a data frame with at least 1 row")
-      }
-      needed <- c("risk", "horizon")
-      if (!all(needed %in% colnames(profile))) {
-        stop("Profile must have columns: ",
-          paste(needed, collapse = ", "))
+        stop("Second input must be a data frame")
       }
     },
     expr_type = "bquoted",
-    external_ctrl = TRUE,
-    allow_empty_state = "state",
-    class = c("portfolio_optimizer_block", "dm_block"),
+    allow_empty_state = c("max_weight", "max_positions",
+      "ticker_limits_json"),
+    external_ctrl = c("strategy", "max_weight", "max_positions",
+      "ticker_limits_json"),
+    class = "portfolio_optimizer_block",
     ...
   )
 }
@@ -150,7 +154,6 @@ new_portfolio_optimizer_block <- function(
 #' @noRd
 make_optimizer_expr <- function(strategy, max_weight, max_positions,
                                  ticker_limits) {
-  # Build ticker_limits as a proper R call: list(GLD = 0.1, EWT = 0.05)
   if (is.list(ticker_limits) && length(ticker_limits) > 0) {
     tl_args <- lapply(names(ticker_limits), function(nm) {
       ticker_limits[[nm]]
@@ -196,5 +199,3 @@ optimizer_block_dep <- function() {
     )
   )
 }
-
-# S3 methods: inherit from dm_block for output (clickable dm diagram)

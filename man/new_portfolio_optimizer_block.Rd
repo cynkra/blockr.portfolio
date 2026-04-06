@@ -5,13 +5,21 @@
 \title{Portfolio Optimizer Block}
 \usage{
 new_portfolio_optimizer_block(
-  state = list(strategy = "mean_variance", max_weight = NA_real_, max_positions = -1L,
-    ticker_limits = list()),
+  strategy = "mean_variance",
+  max_weight = NA_real_,
+  max_positions = -1L,
+  ticker_limits_json = "{}",
   ...
 )
 }
 \arguments{
-\item{state}{List with strategy, max_weight, max_positions, ticker_limits}
+\item{strategy}{Optimization strategy}
+
+\item{max_weight}{Maximum position weight (NA = no limit)}
+
+\item{max_positions}{Maximum ETFs (-1 = auto, NA = off)}
+
+\item{ticker_limits_json}{JSON string of per-ticker limits}
 
 \item{...}{Forwarded to \code{\link[blockr.core:new_transform_block]{blockr.core::new_transform_block()}}}
 }
@@ -20,5 +28,5 @@ A transform block of class \code{portfolio_optimizer_block}
 }
 \description{
 A transform block with two inputs (data dm + investor profile data frame).
-Uses the JS-first pattern: single state object flows bidirectionally.
+Uses ridge-regularized ROI solver. Per-ticker limits use DEoptim.
 }

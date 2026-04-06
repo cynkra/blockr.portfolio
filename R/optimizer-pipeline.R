@@ -477,20 +477,44 @@ pf_run_optimizer <- function(dm_data, profile, strategy = "mean_variance",
       constraints$ticker_limits, collapse = ", "))
   opt <- pf_optimize(returns_xts, strategy, constraints)
   weights <- pf_clean_weights(opt$weights)
-  message("[OPTIMIZER] GLD weight after optimize: ",
-    round(weights["GLD"], 4))
+  # Log constrained ticker weights
+  if (!is.null(ticker_limits)) {
+    for (tkr in names(ticker_limits)) {
+      message("[OPTIMIZER] ", tkr, " weight: ",
+        round(weights[tkr], 4), " (limit: ", ticker_limits[[tkr]], ")")
+    }
+  }
 
   # Limit to max_positions: keep top N by weight, zero the rest
   if (!is.na(max_positions) && sum(weights > 0) > max_positions) {
     ranked <- order(weights, decreasing = TRUE)
     keep_idx <- ranked[seq_len(max_positions)]
     weights[-keep_idx] <- 0
-    weights <- pf_clean_weights(weights)
+    # Renormalize, then re-enforce per-ticker limits iteratively
+    for (iter in 1:5) {
+      s <- sum(weights)
+      if (s > 0) weights <- weights / s
+      if (is.null(ticker_limits)) break
+      excess <- 0
+      capped_tickers <- character(0)
+      for (tkr in names(ticker_limits)) {
+        if (tkr %in% names(weights) &&
+            weights[tkr] > ticker_limits[[tkr]]) {
+          excess <- excess + weights[tkr] - ticker_limits[[tkr]]
+          weights[tkr] <- ticker_limits[[tkr]]
+          capped_tickers <- c(capped_tickers, tkr)
+        }
+      }
+      if (excess == 0) break
+      # Redistribute excess to uncapped positions proportionally
+      uncapped <- setdiff(names(weights[weights > 0]), capped_tickers)
+      if (length(uncapped) > 0) {
+        uw <- weights[uncapped]
+        weights[uncapped] <- uw + excess * uw / sum(uw)
+      }
+    }
+    weights[weights < 1e-6] <- 0
   }
-
-  bt <- pf_backtest(returns_xts, weights)
-  frontier_data <- pf_efficient_frontier(returns_xts, constraints)
-  risk_contrib_data <- pf_risk_contribution(returns_xts, weights)
 
   weights_df <- data.frame(
     ticker = names(weights), weight = as.numeric(weights),
@@ -498,32 +522,16 @@ pf_run_optimizer <- function(dm_data, profile, strategy = "mean_variance",
       metadata$ticker)],
     stringsAsFactors = FALSE
   )
-  backtest_df <- data.frame(
-    date = zoo::index(bt$returns),
-    return = as.numeric(bt$returns),
-    cumulative = as.numeric(bt$cumulative),
-    drawdown = as.numeric(bt$drawdown),
-    stringsAsFactors = FALSE
-  )
-  metrics_df <- data.frame(
-    strategy = strategy,
-    ann_return = bt$ann_return, ann_vol = bt$ann_vol,
-    sharpe = bt$sharpe, max_dd = bt$max_dd, var_95 = bt$var_95,
-    stringsAsFactors = FALSE
-  )
+  weights_df <- weights_df[weights_df$weight > 1e-6, , drop = FALSE]
+  weights_df <- weights_df[order(-weights_df$weight), ]
 
-  result_dm <- dm_data |>
-    dm::dm(
-      weights = weights_df, backtest = backtest_df,
-      metrics = metrics_df,
-      frontier = frontier_data$frontier, assets = frontier_data$assets,
-      risk_contrib = risk_contrib_data
-    ) |>
-    dm::dm_add_fk(weights, ticker, metadata) |>
-    dm::dm_add_fk(risk_contrib, ticker, metadata) |>
-    dm::dm_add_fk(assets, ticker, metadata)
+  message("[OPTIMIZER] Returning weights:")
+  for (i in seq_len(nrow(weights_df))) {
+    message("  ", weights_df$ticker[i], ": ",
+      round(weights_df$weight[i] * 100, 1), "%")
+  }
 
-  result_dm
+  weights_df
 }
 
 #' Compute risk contribution per asset
