@@ -145,7 +145,7 @@ new_portfolio_optimizer_block <- function(
       "ticker_limits_json"),
     external_ctrl = c("strategy", "max_weight", "max_positions",
       "ticker_limits_json"),
-    class = "portfolio_optimizer_block",
+    class = c("portfolio_optimizer_block", "dm_block"),
     ...
   )
 }
