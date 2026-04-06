@@ -1,4 +1,7 @@
-#' Fetch OHLC data for one or more tickers
+#' Fetch OHLC data for one or more tickers (with daily cache)
+#'
+#' Results are cached per ticker+periodicity in a temp directory.
+#' Cache entries older than 24 hours are re-fetched.
 #'
 #' @param tickers Character vector of ticker symbols
 #' @param from Start date
@@ -11,12 +14,16 @@ pf_fetch_tickers <- function(tickers, from, to, periodicity = "daily",
                               source = "yahoo") {
   # Fetch each ticker individually so one failure doesn't kill the batch
   dfs <- lapply(tickers, function(tkr) {
+    # Check cache first
+    cached <- pf_cache_read(tkr, periodicity, from)
+    if (!is.null(cached)) return(cached)
+
     tryCatch({
       raw <- quantmod::getSymbols(
         tkr, src = source, from = from, to = to,
         periodicity = periodicity, auto.assign = FALSE
       )
-      data.frame(
+      df <- data.frame(
         date = zoo::index(raw),
         ticker = tkr,
         open = as.numeric(quantmod::Op(raw)),
@@ -27,6 +34,10 @@ pf_fetch_tickers <- function(tickers, from, to, periodicity = "daily",
         adjusted = as.numeric(quantmod::Ad(raw)),
         stringsAsFactors = FALSE
       )
+      # Drop rows with NA close (e.g. incomplete current week)
+      df <- df[!is.na(df$close), , drop = FALSE]
+      pf_cache_write(tkr, periodicity, from, df)
+      df
     }, error = function(e) {
       # Try bundled fallback for this ticker
       pf_bundled_ohlc(tkr, from, to)
@@ -44,6 +55,33 @@ pf_fetch_tickers <- function(tickers, from, to, periodicity = "daily",
   } else {
     result
   }
+}
+
+# --- OHLC cache (file-based, 24h TTL) ---
+
+.pf_cache_dir <- function() {
+  d <- file.path(tempdir(), "blockr_ohlc_cache")
+  if (!dir.exists(d)) dir.create(d, recursive = TRUE)
+  d
+}
+
+.pf_cache_key <- function(ticker, periodicity, from) {
+  safe <- gsub("[^A-Za-z0-9_-]", "_", ticker)
+  paste0(safe, "__", periodicity, "__", from, ".rds")
+}
+
+pf_cache_read <- function(ticker, periodicity, from, max_age_hours = 24) {
+  path <- file.path(.pf_cache_dir(), .pf_cache_key(ticker, periodicity, from))
+  if (!file.exists(path)) return(NULL)
+  age_hours <- as.numeric(
+    difftime(Sys.time(), file.mtime(path), units = "hours"))
+  if (age_hours > max_age_hours) return(NULL)
+  tryCatch(readRDS(path), error = function(e) NULL)
+}
+
+pf_cache_write <- function(ticker, periodicity, from, df) {
+  path <- file.path(.pf_cache_dir(), .pf_cache_key(ticker, periodicity, from))
+  tryCatch(saveRDS(df, path), error = function(e) NULL)
 }
 
 #' Read bundled OHLC data as fallback

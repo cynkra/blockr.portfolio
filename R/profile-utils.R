@@ -1,37 +1,33 @@
-#' Derive financial parameters from investor profile
+#' Derive risk and horizon from demographics
 #'
-#' Maps personal details (age, family status, investment amount) to
-#' continuous slider values for risk appetite and investment horizon.
+#' Maps age and dependents to continuous 0-100 values for risk appetite
+#' and investment horizon.
 #'
-#' @param age Integer: investor age (18-100)
-#' @param family Character: "single", "married", "married_kids", or "retired"
-#' @param amount Numeric: investment amount
+#' @param age Numeric: investor age (18-100)
+#' @param has_dependents Logical: has kids or other dependents
 #' @return List with risk_slider (0-100), horizon_slider (0-100)
 #' @noRd
-pf_derive_profile <- function(age, family, amount) {
-  # Risk slider: 0 = most conservative, 100 = most aggressive
-  risk_slider <- if (age < 30) {
-    85L
-  } else if (age < 45) {
-    if (family %in% c("married_kids", "retired")) 50L else 70L
-  } else if (age < 55) {
-    if (family %in% c("married_kids", "retired")) 40L else 50L
-  } else if (age < 65) {
-    if (family == "single") 40L else 25L
-  } else {
-    20L
+pf_derive_profile <- function(age, has_dependents = FALSE, ...) {
+  age <- max(18, min(100, as.numeric(age)))
+
+  # Risk: continuous linear decline with age
+  # Age 20 → 90, Age 45 → 55, Age 65 → 20, Age 80 → 10
+  risk_slider <- as.integer(round(max(5, min(95,
+    100 - (age - 18) * 1.1
+  ))))
+
+  # Dependents nudge risk down by ~15 points
+  if (isTRUE(has_dependents)) {
+    risk_slider <- as.integer(max(5, risk_slider - 15L))
   }
 
-  # Horizon slider: 0 = shortest (1yr), 100 = longest (30+yr)
-  # Rough mapping: horizon ≈ years until retirement (65) or drawdown
-  years_left <- max(5, 65 - age)
-  horizon_slider <- as.integer(min(100, max(0,
-    if (years_left >= 30) 90L
-    else if (years_left >= 20) 75L
-    else if (years_left >= 10) 55L
-    else if (years_left >= 5) 35L
-    else 10L
-  )))
+
+  # Horizon: gradual decline with age, but never below ~30 (5-10 years)
+  # Age 20 → 90, Age 40 → 70, Age 55 → 55, Age 65 → 42, Age 75 → 32, Age 85 → 28
+  # Even elderly investors have 5-15 year horizons (life expectancy, legacy)
+  horizon_slider <- as.integer(round(max(25, min(95,
+    95 - (age - 18) * 0.85
+  ))))
 
   list(
     risk_slider = risk_slider,

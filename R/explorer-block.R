@@ -64,10 +64,12 @@ new_share_explorer_block <- function(
             sort(unique(r_ohlc()$ticker))
           })
 
-          # Auto-select first ticker
+          # Auto-select first ticker, or re-select if current is gone
           shiny::observe({
             tickers <- r_available_tickers()
-            if (is.null(r_selected_ticker()) && length(tickers) > 0) {
+            current <- r_selected_ticker()
+            if (length(tickers) > 0 &&
+                (is.null(current) || !current %in% tickers)) {
               r_selected_ticker(tickers[1])
             }
           })
@@ -101,15 +103,14 @@ new_share_explorer_block <- function(
           # Monthly returns
           r_monthly_returns <- shiny::reactive({
             d <- r_ticker_data()
-            shiny::req(nrow(d) > 0)
-            d$month <- format(d$date, "%Y-%m")
-            monthly <- tapply(d$close, d$month, function(x) {
-              if (length(x) < 2) return(NA_real_)
-              utils::tail(x, 1) / utils::head(x, 1) - 1
-            })
+            shiny::req(nrow(d) > 1)
+            d <- d[order(d$date), ]
+            # Compute return between consecutive observations
+            closes <- d$close
+            returns <- closes[-1] / closes[-length(closes)] - 1
             data.frame(
-              month = names(monthly),
-              return = as.numeric(monthly),
+              month = format(d$date[-1], "%Y-%m"),
+              return = returns,
               stringsAsFactors = FALSE
             )
           })
@@ -349,7 +350,13 @@ new_share_explorer_block <- function(
                     panel$category)),
                 shiny::div(class = "se-chart-body", chart))
             })
-            shiny::tagList(chart_tags)
+
+            # Resize echarts after DOM settles (fixes initial width)
+            resize_js <- shiny::tags$script(shiny::HTML(
+              "setTimeout(function(){window.dispatchEvent(new Event('resize'))}, 200);"
+            ))
+
+            shiny::tagList(chart_tags, resize_js)
           })
 
           list(

@@ -11,7 +11,7 @@
 #' @return List of constraint parameters
 #' @noRd
 pf_build_constraints <- function(risk_val, horizon_val, max_weight,
-                                  metadata) {
+                                  metadata, ticker_limits = NULL) {
   # Continuous mapping from 0-100 values to optimization parameters
   # Risk aversion: exponential scale (0→20, 50→2, 100→0.1)
   risk_val <- max(0, min(100, as.numeric(risk_val)))
@@ -42,6 +42,7 @@ pf_build_constraints <- function(risk_val, horizon_val, max_weight,
   list(
     risk_aversion = risk_aversion,
     max_weight = effective_max_weight,
+    ticker_limits = ticker_limits,
     groups = list(equity = equity_idx, bonds = bond_idx,
       alternatives = alt_idx),
     group_max = c(equity_max, 1.0, alt_max),
@@ -70,8 +71,19 @@ pf_optimize <- function(returns_xts, strategy, constraints) {
   pspec <- PortfolioAnalytics::portfolio.spec(assets = funds)
   pspec <- PortfolioAnalytics::add.constraint(pspec,
     type = "full_investment")
+
+  # Per-ticker box constraints
+  max_vec <- rep(constraints$max_weight, length(funds))
+  names(max_vec) <- funds
+  if (!is.null(constraints$ticker_limits)) {
+    for (tkr in names(constraints$ticker_limits)) {
+      if (tkr %in% funds) {
+        max_vec[tkr] <- constraints$ticker_limits[[tkr]]
+      }
+    }
+  }
   pspec <- PortfolioAnalytics::add.constraint(pspec, type = "box",
-    min = 0, max = constraints$max_weight)
+    min = 0, max = max_vec)
 
   # Group constraints
   non_empty <- lengths(constraints$groups) > 0
@@ -366,7 +378,9 @@ pf_adjust_currency <- function(returns_xts, fx_xts, currency) {
 #' @noRd
 pf_run_optimizer <- function(dm_data, profile, strategy = "mean_variance",
                               max_weight = NA_real_,
-                              max_positions = NA_integer_) {
+                              max_positions = NA_integer_,
+                              ticker_limits = list()) {
+  if (length(ticker_limits) == 0) ticker_limits <- NULL
   tbls <- dm::dm_get_tables(dm_data)
   metadata <- as.data.frame(tbls[["metadata"]])
   ret_df <- as.data.frame(tbls[["returns"]])
@@ -383,18 +397,10 @@ pf_run_optimizer <- function(dm_data, profile, strategy = "mean_variance",
   metadata <- metadata[metadata$type != "FX" &
     metadata$ticker %in% colnames(returns_xts), , drop = FALSE]
 
-  # Drop tickers with too many NAs (< 60 months of data)
-  # and use pairwise-complete date range for the rest
-  enough_data <- apply(returns_xts, 2, function(x) sum(!is.na(x)) >= 60)
-  returns_xts <- returns_xts[, enough_data, drop = FALSE]
-  metadata <- metadata[metadata$ticker %in% colnames(returns_xts), ,
-    drop = FALSE]
-
-  # For PortfolioAnalytics: fill remaining NAs with 0 (rare, edge months)
-  returns_xts[is.na(returns_xts)] <- 0
-
   risk_val <- as.numeric(profile$risk[1])
   horizon_val <- as.numeric(profile$horizon[1])
+  if (is.na(risk_val)) risk_val <- 50
+  if (is.na(horizon_val)) horizon_val <- 50
   amount <- if ("amount" %in% colnames(profile))
     as.numeric(profile$amount[1]) else NA_real_
 
@@ -412,8 +418,15 @@ pf_run_optimizer <- function(dm_data, profile, strategy = "mean_variance",
   # Adjust returns to target currency
   returns_xts <- pf_adjust_currency(returns_xts, fx_xts, currency)
 
+  # Drop tickers with insufficient data and fill remaining NAs
+  enough_data <- apply(returns_xts, 2, function(x) sum(!is.na(x)) >= 24)
+  returns_xts <- returns_xts[, enough_data, drop = FALSE]
+  metadata <- metadata[metadata$ticker %in% colnames(returns_xts), ,
+    drop = FALSE]
+  returns_xts[is.na(returns_xts)] <- 0
+
   constraints <- pf_build_constraints(risk_val, horizon_val,
-    max_weight, metadata)
+    max_weight, metadata, ticker_limits = ticker_limits)
   opt <- pf_optimize(returns_xts, strategy, constraints)
   weights <- pf_clean_weights(opt$weights)
 

@@ -2,6 +2,9 @@
  * TickerTable — searchable table for selecting tickers
  * Follows the blockr.task subtask-table pattern:
  *   vanilla DOM, Shiny InputBinding, server-side search via custom messages.
+ *
+ * UX: selected tickers shown as removable chips above the search box.
+ * Empty search shows selected tickers; typing switches to catalog search.
  */
 class TickerTable {
   constructor(el, state) {
@@ -14,12 +17,18 @@ class TickerTable {
     this._debounce = null;
     this._callback = null;
     this._build();
+    this._renderChips();
     this._renderRows();
   }
 
   _build() {
     this.el.innerHTML = '';
     this.el.classList.add('tt-wrap');
+
+    // Chips container (selected tickers)
+    this.chipsEl = document.createElement('div');
+    this.chipsEl.className = 'tt-chips';
+    this.el.appendChild(this.chipsEl);
 
     // Search row
     const searchRow = document.createElement('div');
@@ -30,7 +39,7 @@ class TickerTable {
     this.searchInput = document.createElement('input');
     this.searchInput.type = 'text';
     this.searchInput.className = 'tt-search-input';
-    this.searchInput.placeholder = 'Search tickers...';
+    this.searchInput.placeholder = 'Search 42,000+ tickers...';
     this.searchInput.addEventListener('input', () => this._onSearch());
     searchRow.appendChild(searchIcon);
     searchRow.appendChild(this.searchInput);
@@ -50,8 +59,7 @@ class TickerTable {
       { key: 'selected', label: '', sortable: false },
       { key: 'ticker', label: 'Ticker', sortable: true },
       { key: 'name', label: 'Name', sortable: true },
-      { key: 'sector', label: 'Sector', sortable: true },
-      { key: 'source', label: '', sortable: false }
+      { key: 'sector', label: 'Sector', sortable: true }
     ];
     cols.forEach(col => {
       const th = document.createElement('th');
@@ -72,18 +80,52 @@ class TickerTable {
     this.el.appendChild(wrap);
   }
 
+  _renderChips() {
+    this.chipsEl.innerHTML = '';
+    if (this.selected.size === 0) {
+      this.chipsEl.style.display = 'none';
+      return;
+    }
+    this.chipsEl.style.display = 'flex';
+    this.selected.forEach(ticker => {
+      const chip = document.createElement('span');
+      chip.className = 'tt-chip';
+      chip.dataset.ticker = ticker;
+
+      const label = document.createElement('span');
+      label.className = 'tt-chip-label';
+      label.textContent = ticker;
+      chip.appendChild(label);
+
+      const removeBtn = document.createElement('button');
+      removeBtn.className = 'tt-chip-remove';
+      removeBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" fill="currentColor" viewBox="0 0 16 16"><path d="M4.646 4.646a.5.5 0 0 1 .708 0L8 7.293l2.646-2.647a.5.5 0 0 1 .708.708L8.707 8l2.647 2.646a.5.5 0 0 1-.708.708L8 8.707l-2.646 2.647a.5.5 0 0 1-.708-.708L7.293 8 4.646 5.354a.5.5 0 0 1 0-.708z"/></svg>';
+      removeBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this._onChipRemove(ticker);
+      });
+      chip.appendChild(removeBtn);
+
+      this.chipsEl.appendChild(chip);
+    });
+  }
+
   _renderRows() {
     this.tbody.innerHTML = '';
-    let items = this.tickers.slice();
+    var isSearching = !!this.searchTerm;
+    var items;
 
-    // Filter
-    if (this.searchTerm) {
-      const q = this.searchTerm.toLowerCase();
-      items = items.filter(t =>
-        (t.ticker || '').toLowerCase().includes(q) ||
-        (t.name || '').toLowerCase().includes(q) ||
-        (t.sector || '').toLowerCase().includes(q)
-      );
+    if (isSearching) {
+      // Search mode: show matching tickers from loaded data
+      var q = this.searchTerm.toLowerCase();
+      items = this.tickers.filter(function(t) {
+        return (t.ticker || '').toLowerCase().includes(q) ||
+          (t.name || '').toLowerCase().includes(q) ||
+          (t.sector || '').toLowerCase().includes(q);
+      });
+    } else {
+      // Idle mode: show only selected tickers
+      items = this.tickers.filter(t => this.selected.has(t.ticker));
     }
 
     // Sort
@@ -97,19 +139,23 @@ class TickerTable {
       });
     }
 
-    // Selected first
-    items.sort((a, b) => {
-      const sa = this.selected.has(a.ticker) ? 0 : 1;
-      const sb = this.selected.has(b.ticker) ? 0 : 1;
-      return sa - sb;
-    });
+    // In search mode, put selected first
+    if (isSearching) {
+      items.sort((a, b) => {
+        const sa = this.selected.has(a.ticker) ? 0 : 1;
+        const sb = this.selected.has(b.ticker) ? 0 : 1;
+        return sa - sb;
+      });
+    }
 
     if (items.length === 0) {
       const tr = document.createElement('tr');
       const td = document.createElement('td');
-      td.colSpan = 5;
+      td.colSpan = 4;
       td.className = 'tt-empty';
-      td.textContent = this.searchTerm ? 'No matches' : 'No tickers available';
+      td.textContent = isSearching
+        ? 'No matches — try a different query'
+        : 'No tickers selected — use search to add';
       tr.appendChild(td);
       this.tbody.appendChild(tr);
       return;
@@ -147,17 +193,6 @@ class TickerTable {
       tdSector.className = 'tt-col-sector';
       tdSector.textContent = t.sector || '';
       tr.appendChild(tdSector);
-
-      // Source dot
-      const tdSource = document.createElement('td');
-      tdSource.className = 'tt-col-source';
-      const dot = document.createElement('span');
-      var isCatalog = t.source === 'bundled' || t.source === 'catalog';
-      dot.className = 'tt-source-dot ' +
-        (isCatalog ? 'tt-source-bundled' : 'tt-source-live');
-      dot.title = isCatalog ? 'In catalog' : 'Live data';
-      tdSource.appendChild(dot);
-      tr.appendChild(tdSource);
 
       this.tbody.appendChild(tr);
     });
@@ -205,6 +240,14 @@ class TickerTable {
     } else {
       this.selected.add(ticker);
     }
+    this._renderChips();
+    this._renderRows();
+    this._submit();
+  }
+
+  _onChipRemove(ticker) {
+    this.selected.delete(ticker);
+    this._renderChips();
     this._renderRows();
     this._submit();
   }
@@ -231,6 +274,7 @@ class TickerTable {
   setState(state) {
     if (state.selected) this.selected = new Set(state.selected);
     if (state.tickers) this.tickers = state.tickers;
+    this._renderChips();
     this._renderRows();
   }
 }

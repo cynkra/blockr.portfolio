@@ -28,7 +28,7 @@ candlestick_panel <- function() {
     description = "OHLC candlestick with moving averages",
     controls = list(
       show_ma = list(type = "toggle", label = "Moving Averages",
-        default = FALSE),
+        default = TRUE),
       show_volume = list(type = "toggle", label = "Volume",
         default = FALSE)
     ),
@@ -97,9 +97,11 @@ candlestick_panel <- function() {
         axisLabel = list(color = "#6b7280", fontSize = 11)
       ))
       data_zoom <- list(
-        list(type = "inside", xAxisIndex = 0, start = 70, end = 100),
+        list(type = "inside", xAxisIndex = 0, start = 70, end = 100,
+          filterMode = "filter"),
         list(type = "slider", xAxisIndex = 0, start = 70, end = 100,
-          bottom = if (show_volume) "15%" else 10)
+          bottom = if (show_volume) "15%" else 10,
+          filterMode = "filter")
       )
 
       opts <- list(

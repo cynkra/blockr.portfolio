@@ -6,6 +6,48 @@
   color: #111827;
 }
 
+/* Selected ticker chips */
+.tt-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 6px;
+}
+.tt-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px 6px 3px 8px;
+  background: #dbeafe;
+  border: 1px solid #93c5fd;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #1d4ed8;
+  white-space: nowrap;
+}
+.tt-chip-label {
+  line-height: 1;
+}
+.tt-chip-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: #3b82f6;
+  border-radius: 50%;
+  cursor: pointer;
+  transition: all 0.1s;
+}
+.tt-chip-remove:hover {
+  background: #bfdbfe;
+  color: #1e40af;
+}
+
 /* Search row */
 .tt-search-row {
   display: flex;
@@ -77,10 +119,9 @@
 
 /* Column widths */
 .tt-col-check { width: 28px; text-align: center; }
-.tt-col-ticker { width: 70px; font-weight: 600; }
+.tt-col-ticker { width: 80px; font-weight: 600; }
 .tt-col-name { }
 .tt-col-sector { width: 90px; color: #6b7280; }
-.tt-col-source { width: 24px; text-align: center; }
 
 /* Rows */
 .tt-table tbody tr {
@@ -106,16 +147,6 @@
 .tt-col-check {
   color: #3b82f6;
 }
-
-/* Source dot */
-.tt-source-dot {
-  display: inline-block;
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-}
-.tt-source-bundled { background: #059669; }
-.tt-source-live { background: #3b82f6; }
 
 /* Empty state */
 .tt-empty {

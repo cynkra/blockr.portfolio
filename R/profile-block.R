@@ -1,27 +1,29 @@
 #' Investor Profile Block
 #'
-#' A data block that captures investor personal details and outputs
-#' a one-row data frame with risk/horizon as continuous 0-100 values.
+#' A data block that captures investor preferences and outputs
+#' a one-row data frame with currency, risk (0-100), horizon (0-100),
+#' and investment amount.
 #'
-#' @param age Investor age (18-100)
-#' @param family Family status: "single", "married", "married_kids", "retired"
+#' @param age Investor age (18-100), used to suggest risk/horizon defaults
+#' @param family Family status, used to suggest risk defaults
 #' @param amount Investment amount
 #' @param currency Base currency: "USD", "CHF", "EUR"
+#' @param risk_slider Risk preference 0-100 (NULL = derive from age/family)
+#' @param horizon_slider Horizon preference 0-100 (NULL = derive from age)
 #' @param ... Forwarded to [blockr.core::new_data_block()]
 #'
 #' @return A data block of class `investor_profile_block`
 #' @export
 new_investor_profile_block <- function(
     age = 35L,
-    family = "single",
+    has_dependents = FALSE,
     amount = 50000,
     currency = "USD",
     risk_slider = NULL,
     horizon_slider = NULL,
     ...) {
 
-  # Compute initial slider defaults from age/family if not provided
-  init <- pf_derive_profile(age, family, amount)
+  init <- pf_derive_profile(age, has_dependents)
   if (is.null(risk_slider)) risk_slider <- init$risk_slider
   if (is.null(horizon_slider)) horizon_slider <- init$horizon_slider
 
@@ -31,23 +33,27 @@ new_investor_profile_block <- function(
         id,
         function(input, output, session) {
           r_age <- shiny::reactiveVal(as.integer(age))
-          r_family <- shiny::reactiveVal(family)
+          r_has_dependents <- shiny::reactiveVal(has_dependents)
           r_amount <- shiny::reactiveVal(amount)
           r_currency <- shiny::reactiveVal(currency)
           r_risk_slider <- shiny::reactiveVal(risk_slider)
           r_horizon_slider <- shiny::reactiveVal(horizon_slider)
 
-          # When age/family/amount change, update slider recommendations
+          # When demographics change, update sliders + suggestion markers
           shiny::observeEvent(
-            list(r_age(), r_family(), r_amount()), {
+            list(r_age(), r_has_dependents()), {
               derived <- pf_derive_profile(
-                r_age(), r_family(), r_amount())
+                r_age(), r_has_dependents())
               r_risk_slider(derived$risk_slider)
               r_horizon_slider(derived$horizon_slider)
               session$sendCustomMessage(
                 session$ns("sync_sliders"),
-                list(risk = derived$risk_slider,
-                  horizon = derived$horizon_slider))
+                list(
+                  risk = derived$risk_slider,
+                  horizon = derived$horizon_slider,
+                  suggest_risk = derived$risk_slider,
+                  suggest_horizon = derived$horizon_slider
+                ))
             }, ignoreInit = TRUE)
 
           shiny::observeEvent(input$profile_ctrl, {
@@ -55,7 +61,8 @@ new_investor_profile_block <- function(
             if (is.null(msg)) return()
             switch(msg$param,
               age = r_age(as.integer(msg$value)),
-              family = r_family(msg$value),
+              has_dependents = r_has_dependents(
+                isTRUE(msg$value) || msg$value == "true"),
               amount = r_amount(as.numeric(msg$value)),
               currency = r_currency(msg$value),
               risk_slider = r_risk_slider(as.integer(msg$value)),
@@ -66,8 +73,6 @@ new_investor_profile_block <- function(
 
           list(
             expr = shiny::reactive({
-              derived <- pf_derive_profile(
-                r_age(), r_family(), r_amount())
               bquote(data.frame(
                 currency = .(r_currency()),
                 risk = .(r_risk_slider()),
@@ -78,7 +83,7 @@ new_investor_profile_block <- function(
             }),
             state = list(
               age = r_age,
-              family = r_family,
+              has_dependents = r_has_dependents,
               amount = r_amount,
               currency = r_currency,
               risk_slider = r_risk_slider,
@@ -95,60 +100,32 @@ new_investor_profile_block <- function(
         shiny::div(
           class = "ip-layout", id = ns("ip_layout"),
 
+          # === Primary values ===
           shiny::div(class = "ip-section",
-            shiny::div(class = "ip-title", "Your Profile"),
 
-            # Age
-            shiny::div(class = "ip-group",
-              shiny::div(class = "ip-label", "Age"),
-              shiny::tags$input(
-                type = "number", class = "ip-numeric",
-                `data-param` = "age",
-                value = age, min = 18, max = 100, step = 1
+            # Amount + Currency on one row
+            shiny::div(class = "ip-row",
+              shiny::div(class = "ip-group ip-flex1",
+                shiny::div(class = "ip-label", "Investment Amount"),
+                shiny::tags$input(
+                  type = "number", class = "ip-numeric",
+                  `data-param` = "amount",
+                  value = amount, min = 1000, max = 10000000,
+                  step = 1000
+                )
+              ),
+              shiny::div(class = "ip-group",
+                shiny::div(class = "ip-label", "Currency"),
+                shiny::div(class = "ip-radios",
+                  ip_radio_chip(ns, "currency", "USD", "USD",
+                    currency),
+                  ip_radio_chip(ns, "currency", "CHF", "CHF",
+                    currency),
+                  ip_radio_chip(ns, "currency", "EUR", "EUR",
+                    currency)
+                )
               )
             ),
-
-            # Family
-            shiny::div(class = "ip-group",
-              shiny::div(class = "ip-label", "Family Status"),
-              shiny::div(class = "ip-radios",
-                ip_radio_chip(ns, "family", "single", "Single",
-                  family),
-                ip_radio_chip(ns, "family", "married", "Married",
-                  family),
-                ip_radio_chip(ns, "family", "married_kids", "+Kids",
-                  family),
-                ip_radio_chip(ns, "family", "retired", "Retired",
-                  family)
-              )
-            ),
-
-            # Amount
-            shiny::div(class = "ip-group",
-              shiny::div(class = "ip-label", "Investment Amount"),
-              shiny::tags$input(
-                type = "number", class = "ip-numeric",
-                `data-param` = "amount",
-                value = amount, min = 1000, max = 10000000, step = 1000
-              )
-            ),
-
-            # Currency
-            shiny::div(class = "ip-group",
-              shiny::div(class = "ip-label", "Base Currency"),
-              shiny::div(class = "ip-radios",
-                ip_radio_chip(ns, "currency", "USD", "USD",
-                  currency),
-                ip_radio_chip(ns, "currency", "CHF", "CHF",
-                  currency),
-                ip_radio_chip(ns, "currency", "EUR", "EUR",
-                  currency)
-              )
-            )
-          ),
-
-          # Risk & Horizon sliders
-          shiny::div(class = "ip-section ip-sliders",
 
             # Risk appetite slider
             shiny::div(class = "ip-slider-group",
@@ -158,12 +135,18 @@ new_investor_profile_block <- function(
                   id = ns("risk_label"),
                   pf_risk_label(risk_slider))
               ),
-              shiny::tags$input(
-                type = "range", class = "ip-slider",
-                id = ns("risk_slider"),
-                `data-param` = "risk_slider",
-                min = 0, max = 100, value = risk_slider,
-                step = 1
+              shiny::div(class = "ip-slider-wrap",
+                shiny::tags$input(
+                  type = "range", class = "ip-slider",
+                  id = ns("risk_slider"),
+                  `data-param` = "risk_slider",
+                  min = 0, max = 100, value = risk_slider, step = 1
+                ),
+                # Suggestion marker (positioned via JS)
+                shiny::div(class = "ip-suggest-marker",
+                  id = ns("risk_suggest"),
+                  title = "Suggested based on demographics"
+                )
               ),
               shiny::div(class = "ip-slider-ticks",
                 shiny::span("Conservative"),
@@ -181,17 +164,48 @@ new_investor_profile_block <- function(
                   id = ns("horizon_label"),
                   pf_horizon_label(horizon_slider))
               ),
-              shiny::tags$input(
-                type = "range", class = "ip-slider",
-                id = ns("horizon_slider"),
-                `data-param` = "horizon_slider",
-                min = 0, max = 100, value = horizon_slider,
-                step = 1
+              shiny::div(class = "ip-slider-wrap",
+                shiny::tags$input(
+                  type = "range", class = "ip-slider",
+                  id = ns("horizon_slider"),
+                  `data-param` = "horizon_slider",
+                  min = 0, max = 100, value = horizon_slider,
+                  step = 1
+                ),
+                shiny::div(class = "ip-suggest-marker",
+                  id = ns("horizon_suggest"),
+                  title = "Suggested based on demographics"
+                )
               ),
               shiny::div(class = "ip-slider-ticks",
                 shiny::span("1 yr"),
                 shiny::span("10 yrs"),
                 shiny::span("30+ yrs")
+              )
+            )
+          ),
+
+          # === Demographics helper ===
+          shiny::div(class = "ip-demographics",
+            shiny::div(class = "ip-demo-label",
+              "Adjust risk & horizon based on your situation"),
+            shiny::div(class = "ip-demo-row",
+              shiny::div(class = "ip-demo-age",
+                shiny::span(class = "ip-demo-hint", "Age"),
+                shiny::tags$input(
+                  type = "number", class = "ip-demo-input",
+                  `data-param` = "age",
+                  value = age, min = 18, max = 100, step = 1
+                )
+              ),
+              shiny::tags$label(class = "ip-demo-toggle",
+                shiny::tags$input(
+                  type = "checkbox",
+                  class = "ip-demo-checkbox",
+                  `data-param` = "has_dependents",
+                  checked = if (has_dependents) NA else NULL
+                ),
+                shiny::span("Dependents")
               )
             )
           )
@@ -204,6 +218,8 @@ new_investor_profile_block <- function(
             var ctrlId = '", ns("profile_ctrl"), "';
             var riskLabelId = '", ns("risk_label"), "';
             var horizonLabelId = '", ns("horizon_label"), "';
+            var riskSuggestId = '", ns("risk_suggest"), "';
+            var horizonSuggestId = '", ns("horizon_suggest"), "';
             var syncMsgId = '", ns("sync_sliders"), "';
             var debounceTimer = null;
 
@@ -222,6 +238,22 @@ new_investor_profile_block <- function(
               if (v < 85) return '20-30 years';
               return '30+ years';
             }
+            function positionMarker(markerId, value) {
+              var $marker = $('#' + markerId);
+              if (!$marker.length) return;
+              $marker.css('left', value + '%');
+              // Hide marker if it matches the slider position
+              var $slider = $marker.siblings('.ip-slider');
+              if ($slider.length && parseInt($slider.val()) === value) {
+                $marker.addClass('ip-hidden');
+              } else {
+                $marker.removeClass('ip-hidden');
+              }
+            }
+
+            // Initial marker positions
+            positionMarker(riskSuggestId, ", risk_slider, ");
+            positionMarker(horizonSuggestId, ", horizon_slider, ");
 
             // Radio chip click
             $(document).on('click', '#' + layoutId + ' .ip-radio', function(e) {
@@ -234,7 +266,7 @@ new_investor_profile_block <- function(
               }, {priority: 'event'});
             });
 
-            // Numeric input change
+            // Numeric input change (amount)
             $(document).on('change', '#' + layoutId + ' .ip-numeric', function(e) {
               Shiny.setInputValue(ctrlId, {
                 param: $(this).data('param'),
@@ -242,17 +274,37 @@ new_investor_profile_block <- function(
               }, {priority: 'event'});
             });
 
+            // Demographics: age input (continuous update)
+            $(document).on('input', '#' + layoutId + ' .ip-demo-input', function(e) {
+              Shiny.setInputValue(ctrlId, {
+                param: $(this).data('param'),
+                value: $(this).val()
+              }, {priority: 'event'});
+            });
+
+            // Demographics: dependents checkbox
+            $(document).on('change', '#' + layoutId + ' .ip-demo-checkbox', function(e) {
+              Shiny.setInputValue(ctrlId, {
+                param: $(this).data('param'),
+                value: $(this).is(':checked')
+              }, {priority: 'event'});
+            });
+
             // Slider input (debounced)
             $(document).on('input', '#' + layoutId + ' .ip-slider', function(e) {
               var param = $(this).data('param');
               var value = parseInt($(this).val());
-              // Update label immediately
               if (param === 'risk_slider') {
                 $('#' + riskLabelId).text(riskLabel(value));
+                positionMarker(riskSuggestId, parseInt($('#' + riskSuggestId).css('left')) || 0);
               } else if (param === 'horizon_slider') {
                 $('#' + horizonLabelId).text(horizonLabel(value));
               }
-              // Debounce server update
+              // Hide/show marker based on match
+              var $marker = $(this).siblings('.ip-suggest-marker');
+              var markerPos = parseFloat($marker.css('left')) / $(this).width() * 100;
+              $marker.toggleClass('ip-hidden', Math.abs(value - markerPos) < 3);
+
               clearTimeout(debounceTimer);
               debounceTimer = setTimeout(function() {
                 Shiny.setInputValue(ctrlId, {
@@ -261,24 +313,31 @@ new_investor_profile_block <- function(
               }, 200);
             });
 
-            // Sync sliders from server (when age/family changes)
+            // Sync sliders + suggestion markers from server
             Shiny.addCustomMessageHandler(syncMsgId, function(msg) {
-              var $risk = $('#' + layoutId + ' .ip-slider[data-param=risk_slider]');
-              var $horizon = $('#' + layoutId + ' .ip-slider[data-param=horizon_slider]');
+              var $layout = $('#' + layoutId);
               if (msg.risk !== undefined) {
+                var $risk = $layout.find('.ip-slider[data-param=risk_slider]');
                 $risk.val(msg.risk);
                 $('#' + riskLabelId).text(riskLabel(msg.risk));
               }
               if (msg.horizon !== undefined) {
+                var $horizon = $layout.find('.ip-slider[data-param=horizon_slider]');
                 $horizon.val(msg.horizon);
                 $('#' + horizonLabelId).text(horizonLabel(msg.horizon));
+              }
+              if (msg.suggest_risk !== undefined) {
+                positionMarker(riskSuggestId, msg.suggest_risk);
+              }
+              if (msg.suggest_horizon !== undefined) {
+                positionMarker(horizonSuggestId, msg.suggest_horizon);
               }
             });
           });
         ")))
       )
     },
-    external_ctrl = c("age", "family", "amount", "currency",
+    external_ctrl = c("age", "has_dependents", "amount", "currency",
       "risk_slider", "horizon_slider"),
     class = "investor_profile_block",
     ...
@@ -301,16 +360,15 @@ ip_css <- function() {
   "
   .ip-layout { font-family: 'Open Sans', system-ui, sans-serif; }
   .ip-section { padding: 8px 0; }
-  .ip-sliders { border-top: 1px solid #e5e7eb; margin-top: 4px;
-    padding-top: 12px; }
-  .ip-title { font-size: 14px; font-weight: 600; color: #111827;
-    margin-bottom: 12px; }
   .ip-group { margin-bottom: 10px; }
+  .ip-row { display: flex; gap: 12px; align-items: flex-end;
+    margin-bottom: 10px; }
+  .ip-flex1 { flex: 1; }
   .ip-label { font-size: 11px; font-weight: 500; color: #6b7280;
     text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px; }
   .ip-numeric { width: 100%; padding: 6px 10px; border: 1px solid #d1d5db;
     border-radius: 6px; font-size: 14px; font-family: inherit;
-    background: #fff; color: #111827; }
+    background: #fff; color: #111827; box-sizing: border-box; }
   .ip-numeric:focus { outline: none; border-color: #3b82f6;
     box-shadow: 0 0 0 2px rgba(59,130,246,0.15); }
   .ip-radios { display: flex; flex-wrap: wrap; gap: 4px; }
@@ -321,22 +379,58 @@ ip_css <- function() {
   .ip-radio:hover { background: #f3f4f6; }
   .ip-radio.is-active { background: #dbeafe; border-color: #93c5fd;
     color: #1d4ed8; font-weight: 500; }
+
+  /* Slider */
   .ip-slider-group { margin-bottom: 14px; }
   .ip-slider-header { display: flex; justify-content: space-between;
     align-items: baseline; margin-bottom: 6px; }
   .ip-slider-value { font-size: 12px; font-weight: 500; color: #3b82f6; }
+  .ip-slider-wrap { position: relative; padding: 4px 0; }
   .ip-slider { width: 100%; height: 6px; -webkit-appearance: none;
     appearance: none; background: #e5e7eb; border-radius: 3px;
     outline: none; cursor: pointer; }
   .ip-slider::-webkit-slider-thumb { -webkit-appearance: none;
     width: 18px; height: 18px; border-radius: 50%; background: #3b82f6;
     cursor: pointer; border: 2px solid #fff;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.2); }
+    box-shadow: 0 1px 3px rgba(0,0,0,0.2); position: relative;
+    z-index: 2; }
   .ip-slider::-moz-range-thumb { width: 18px; height: 18px;
     border-radius: 50%; background: #3b82f6; cursor: pointer;
     border: 2px solid #fff; box-shadow: 0 1px 3px rgba(0,0,0,0.2); }
   .ip-slider-ticks { display: flex; justify-content: space-between;
     margin-top: 4px; font-size: 10px; color: #9ca3af; }
+
+  /* Suggestion marker */
+  .ip-suggest-marker {
+    position: absolute; top: 50%; transform: translate(-50%, -50%);
+    width: 0; height: 0;
+    border-left: 5px solid transparent;
+    border-right: 5px solid transparent;
+    border-top: 7px solid #f59e0b;
+    z-index: 1; pointer-events: none;
+    transition: left 0.3s ease;
+  }
+  .ip-suggest-marker.ip-hidden { display: none; }
+
+  /* Demographics helper */
+  .ip-demographics { border-top: 1px solid #e5e7eb; margin-top: 8px;
+    padding-top: 10px; }
+  .ip-demo-label { font-size: 10px; font-weight: 500; color: #9ca3af;
+    text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; }
+  .ip-demo-row { display: flex; align-items: center; gap: 10px; }
+  .ip-demo-age { display: flex; align-items: center; gap: 4px; }
+  .ip-demo-hint { font-size: 11px; color: #9ca3af; }
+  .ip-demo-input { width: 50px; padding: 3px 6px;
+    border: 1px solid #d1d5db; border-radius: 4px; font-size: 12px;
+    font-family: inherit; background: #fff; color: #6b7280;
+    text-align: center; }
+  .ip-demo-input:focus { outline: none; border-color: #3b82f6; }
+  .ip-demo-toggle { display: flex; align-items: center; gap: 5px;
+    font-size: 11px; color: #9ca3af; cursor: pointer;
+    user-select: none; }
+  .ip-demo-checkbox { width: 13px; height: 13px; cursor: pointer;
+    accent-color: #3b82f6; }
+  .ip-hidden { display: none !important; }
   "
 }
 

@@ -14,6 +14,7 @@ new_portfolio_optimizer_block <- function(
     strategy = "mean_variance",
     max_weight = NA_real_,
     max_positions = -1L,
+    ticker_limits = NULL,
     ...) {
 
   blockr.core::new_transform_block(
@@ -24,6 +25,7 @@ new_portfolio_optimizer_block <- function(
           r_strategy <- shiny::reactiveVal(strategy)
           r_max_weight <- shiny::reactiveVal(max_weight)
           r_max_positions <- shiny::reactiveVal(max_positions)
+          r_ticker_limits <- shiny::reactiveVal(ticker_limits)
 
           shiny::observeEvent(input$opt_ctrl, {
             msg <- input$opt_ctrl
@@ -42,9 +44,68 @@ new_portfolio_optimizer_block <- function(
               },
               max_positions = r_max_positions(
                 if (is.null(msg$value) || msg$value == "")
-                  NA_integer_ else as.integer(msg$value))
+                  NA_integer_ else as.integer(msg$value)),
+              ticker_limit = {
+                # msg$value = list(ticker = "EWT", max = 0.05)
+                limits <- r_ticker_limits()
+                if (is.null(limits)) limits <- list()
+                tkr <- msg$value$ticker
+                val <- as.numeric(msg$value$max)
+                if (!is.na(val) && val < 1) {
+                  limits[[tkr]] <- val
+                } else {
+                  limits[[tkr]] <- NULL  # remove limit
+                }
+                if (length(limits) == 0) limits <- NULL
+                r_ticker_limits(limits)
+              }
             )
           })
+
+          # Send ticker list to position limits table
+          shiny::observe({
+            dm_obj <- tryCatch(data(), error = function(e) NULL)
+            if (!inherits(dm_obj, "dm")) return()
+            tbls <- dm::dm_get_tables(dm_obj)
+            if (!"metadata" %in% names(tbls)) return()
+            meta <- as.data.frame(tbls[["metadata"]])
+            meta <- meta[meta$type != "FX", , drop = FALSE]
+            ticker_list <- lapply(seq_len(nrow(meta)), function(i) {
+              list(ticker = meta$ticker[i], name = meta$name[i],
+                region = meta$region[i])
+            })
+            session$sendCustomMessage(
+              "position-limits-tickers",
+              list(id = session$ns("pos_limits"),
+                tickers = ticker_list))
+          })
+
+          # Handle position limits input from JS table
+          shiny::observeEvent(input$pos_limits, {
+            val <- input$pos_limits
+            if (is.null(val) || length(val) == 0) {
+              r_ticker_limits(NULL)
+              return()
+            }
+            # val comes from JS as a list of {ticker, max} objects
+            # Shiny may deliver it in different formats
+            limits <- tryCatch({
+              lim <- list()
+              if (is.list(val) && !is.null(val[[1]]$ticker)) {
+                # List of lists: [{ticker:"EWT", max:0.05}, ...]
+                for (item in val) {
+                  lim[[item$ticker]] <- as.numeric(item$max)
+                }
+              } else if (is.data.frame(val)) {
+                # Data frame with ticker and max columns
+                for (i in seq_len(nrow(val))) {
+                  lim[[val$ticker[i]]] <- as.numeric(val$max[i])
+                }
+              }
+              if (length(lim) > 0) lim else NULL
+            }, error = function(e) NULL)
+            r_ticker_limits(limits)
+          }, ignoreNULL = FALSE)
 
           list(
             expr = shiny::reactive({
@@ -53,19 +114,22 @@ new_portfolio_optimizer_block <- function(
                   .(data), .(profile),
                   strategy = .(strat),
                   max_weight = .(mw),
-                  max_positions = .(mp)
+                  max_positions = .(mp),
+                  ticker_limits = .(tl)
                 ),
                 list(
                   strat = r_strategy(),
                   mw = r_max_weight(),
-                  mp = r_max_positions()
+                  mp = r_max_positions(),
+                  tl = r_ticker_limits() %||% list()
                 )
               )
             }),
             state = list(
               strategy = r_strategy,
               max_weight = r_max_weight,
-              max_positions = r_max_positions
+              max_positions = r_max_positions,
+              ticker_limits = r_ticker_limits
             )
           )
         }
@@ -73,7 +137,28 @@ new_portfolio_optimizer_block <- function(
     },
     ui = function(id) {
       ns <- shiny::NS(id)
+
+      # Resource paths for position limits JS/CSS
+      pkg_path <- system.file(package = "blockr.portfolio")
+      if (nzchar(pkg_path)) {
+        shiny::addResourcePath("blockr-portfolio-js",
+          file.path(pkg_path, "js"))
+        shiny::addResourcePath("blockr-portfolio-css",
+          file.path(pkg_path, "css"))
+      }
+
+      # Initial state for position limits
+      limits_state <- jsonlite::toJSON(
+        list(limits = if (is.null(ticker_limits)) list()
+          else ticker_limits,
+          tickers = list()),
+        auto_unbox = TRUE)
+
       shiny::tagList(
+        shiny::tags$link(rel = "stylesheet",
+          href = "blockr-portfolio-css/position-limits.css"),
+        shiny::tags$script(
+          src = "blockr-portfolio-js/position-limits.js"),
         shiny::tags$style(shiny::HTML(opt_css())),
         shiny::div(
           class = "opt-layout", id = ns("opt_layout"),
@@ -149,6 +234,13 @@ new_portfolio_optimizer_block <- function(
                   identical(max_positions, -1L)) NA else NULL
               )
             )
+          ),
+
+          # Per-position limits table
+          shiny::div(
+            id = ns("pos_limits"),
+            class = "pl-container",
+            `data-state` = as.character(limits_state)
           )
         ),
 
@@ -214,7 +306,7 @@ new_portfolio_optimizer_block <- function(
       }
     },
     expr_type = "bquoted",
-    allow_empty_state = c("max_weight", "max_positions"),
+    allow_empty_state = c("max_weight", "max_positions", "ticker_limits"),
     external_ctrl = c("strategy", "max_weight", "max_positions"),
     class = c("portfolio_optimizer_block", "dm_block"),
     ...
