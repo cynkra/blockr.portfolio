@@ -36,8 +36,21 @@ pf_build_constraints <- function(risk_val, horizon_val, max_weight,
   alt_idx <- which(metadata$asset_class %in%
     c("Real Estate", "Commodity", "Crypto"))
 
-  # NA means no constraint → use 1.0
-  effective_max_weight <- if (is.na(max_weight)) 1.0 else max_weight
+
+  # NA means no explicit global constraint.
+
+  # When per-ticker limits exist, use 0.50 as the default cap for
+
+  # unconstrained tickers — having some at 0.10 and others at 1.0
+  # creates numerically ill-conditioned problems for the QP solver.
+  # Without per-ticker limits, use 1.0 (unconstrained).
+  effective_max_weight <- if (!is.na(max_weight)) {
+    max_weight
+  } else if (!is.null(ticker_limits) && length(ticker_limits) > 0) {
+    0.50
+  } else {
+    1.0
+  }
 
   list(
     risk_aversion = risk_aversion,
@@ -87,13 +100,25 @@ pf_optimize <- function(returns_xts, strategy, constraints) {
   pspec <- PortfolioAnalytics::add.constraint(pspec, type = "box",
     min = min_vec, max = max_vec)
 
-  # Group constraints
+  has_ticker_limits <- !is.null(constraints$ticker_limits) &&
+    length(constraints$ticker_limits) > 0
   non_empty <- lengths(constraints$groups) > 0
   if (any(non_empty)) {
     pspec <- PortfolioAnalytics::add.constraint(pspec, type = "group",
       groups = constraints$groups[non_empty],
       group_min = constraints$group_min[non_empty],
       group_max = constraints$group_max[non_empty])
+  }
+
+  # Ridge-regularized moments for numerical stability.
+  # Adding a small diagonal term to the covariance matrix prevents
+  # the QP solver from failing at certain risk_aversion values
+  # when per-ticker box constraints create ill-conditioned Hessians.
+  ridge_moments <- function(R, portfolio) {
+    list(
+      mu = colMeans(R, na.rm = TRUE),
+      sigma = stats::cov(R) + 0.05 * diag(ncol(R))
+    )
   }
 
   result <- tryCatch(
@@ -105,13 +130,13 @@ pf_optimize <- function(returns_xts, strategy, constraints) {
           type = "risk", name = "StdDev",
           risk_aversion = constraints$risk_aversion)
         PortfolioAnalytics::optimize.portfolio(returns_xts, pspec,
-          optimize_method = "ROI")
+          optimize_method = "ROI", momentFUN = ridge_moments)
       },
       min_vol = {
         pspec <- PortfolioAnalytics::add.objective(pspec,
           type = "risk", name = "var")
         PortfolioAnalytics::optimize.portfolio(returns_xts, pspec,
-          optimize_method = "ROI")
+          optimize_method = "ROI", momentFUN = ridge_moments)
       },
       risk_parity = {
         pspec <- PortfolioAnalytics::add.objective(pspec,
@@ -127,25 +152,25 @@ pf_optimize <- function(returns_xts, strategy, constraints) {
         list(weights = w)
       },
       {
-        w <- rep(1 / length(funds), length(funds))
-        names(w) <- funds
-        list(weights = w)
+        stop("Unknown strategy: ", strategy)
       }
     ),
     error = function(e) {
-      message("Portfolio optimization failed: ", conditionMessage(e))
-      w <- rep(1 / length(funds), length(funds))
-      names(w) <- funds
-      list(weights = w)
+      stop(paste0(
+        "Optimization failed: ", conditionMessage(e), "\n",
+        "Try relaxing your constraints (increase max position weight, ",
+        "remove individual position limits, or use a different strategy)."
+      ))
     }
   )
 
-  # Guard: if optimizer returned NA weights, fall back to equal weight
+  # Guard: if optimizer returned NA weights, report error
   if (!is.null(result$weights) && any(is.na(result$weights))) {
-    message("Optimizer returned NA weights, falling back to equal weight")
-    w <- rep(1 / length(funds), length(funds))
-    names(w) <- funds
-    result$weights <- w
+    stop(paste0(
+      "Optimization could not find a valid portfolio with the current ",
+      "constraints. Try relaxing position limits or increasing the ",
+      "maximum position weight."
+    ))
   }
 
   result
@@ -392,6 +417,12 @@ pf_run_optimizer <- function(dm_data, profile, strategy = "mean_variance",
                               max_weight = NA_real_,
                               max_positions = NA_integer_,
                               ticker_limits = list()) {
+  message("[OPTIMIZER] Called with strategy=", strategy,
+    " max_weight=", max_weight,
+    " ticker_limits=",
+    if (length(ticker_limits) == 0) "none"
+    else paste(names(ticker_limits), "=",
+      unlist(ticker_limits), collapse=", "))
   if (length(ticker_limits) == 0) ticker_limits <- NULL
   tbls <- dm::dm_get_tables(dm_data)
   metadata <- as.data.frame(tbls[["metadata"]])
@@ -439,8 +470,15 @@ pf_run_optimizer <- function(dm_data, profile, strategy = "mean_variance",
 
   constraints <- pf_build_constraints(risk_val, horizon_val,
     max_weight, metadata, ticker_limits = ticker_limits)
+  message("[OPTIMIZER] constraints$max_weight: ", constraints$max_weight)
+  message("[OPTIMIZER] constraints$ticker_limits: ",
+    if (is.null(constraints$ticker_limits)) "NULL"
+    else paste(names(constraints$ticker_limits), "=",
+      constraints$ticker_limits, collapse = ", "))
   opt <- pf_optimize(returns_xts, strategy, constraints)
   weights <- pf_clean_weights(opt$weights)
+  message("[OPTIMIZER] GLD weight after optimize: ",
+    round(weights["GLD"], 4))
 
   # Limit to max_positions: keep top N by weight, zero the rest
   if (!is.na(max_positions) && sum(weights > 0) > max_positions) {

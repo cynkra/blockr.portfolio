@@ -87,23 +87,11 @@ new_portfolio_optimizer_block <- function(
           list(
             expr = shiny::reactive({
               s <- r_state()
-              # Convert ticker_limits list to named list for bbquote
-              tl <- if (length(s$ticker_limits) > 0)
-                s$ticker_limits else list()
-              bbquote(
-                blockr.portfolio:::pf_run_optimizer(
-                  .(data), .(profile),
-                  strategy = .(strat),
-                  max_weight = .(mw),
-                  max_positions = .(mp),
-                  ticker_limits = .(tl)
-                ),
-                list(
-                  strat = s$strategy %||% "mean_variance",
-                  mw = s$max_weight,
-                  mp = s$max_positions,
-                  tl = tl
-                )
+              blockr.portfolio:::make_optimizer_expr(
+                s$strategy %||% "mean_variance",
+                s$max_weight,
+                s$max_positions,
+                s$ticker_limits
               )
             }),
             state = list(state = r_state)
@@ -155,6 +143,38 @@ new_portfolio_optimizer_block <- function(
     allow_empty_state = "state",
     class = c("portfolio_optimizer_block", "dm_block"),
     ...
+  )
+}
+
+#' Build optimizer expression (following blockr.dplyr pattern)
+#' @noRd
+make_optimizer_expr <- function(strategy, max_weight, max_positions,
+                                 ticker_limits) {
+  # Build ticker_limits as a proper R call: list(GLD = 0.1, EWT = 0.05)
+  if (is.list(ticker_limits) && length(ticker_limits) > 0) {
+    tl_args <- lapply(names(ticker_limits), function(nm) {
+      ticker_limits[[nm]]
+    })
+    names(tl_args) <- names(ticker_limits)
+    tl_call <- as.call(c(quote(list), tl_args))
+  } else {
+    tl_call <- quote(list())
+  }
+
+  blockr.core::bbquote(
+    blockr.portfolio:::pf_run_optimizer(
+      .(data), .(profile),
+      strategy = .(strat),
+      max_weight = .(mw),
+      max_positions = .(mp),
+      ticker_limits = .(tl)
+    ),
+    list(
+      strat = strategy,
+      mw = max_weight,
+      mp = max_positions,
+      tl = tl_call
+    )
   )
 }
 
