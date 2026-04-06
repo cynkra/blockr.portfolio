@@ -45,19 +45,26 @@ new_portfolio_optimizer_block <- function(
               max_positions = r_max_positions(
                 if (is.null(msg$value) || msg$value == "")
                   NA_integer_ else as.integer(msg$value)),
-              ticker_limit = {
-                # msg$value = list(ticker = "EWT", max = 0.05)
-                limits <- r_ticker_limits()
-                if (is.null(limits)) limits <- list()
-                tkr <- msg$value$ticker
-                val <- as.numeric(msg$value$max)
-                if (!is.na(val) && val < 1) {
-                  limits[[tkr]] <- val
+              ticker_limits = {
+                # msg$value = [{ticker:"EWT", max:0.05}, ...] or NULL
+                val <- msg$value
+                if (is.null(val) || length(val) == 0) {
+                  r_ticker_limits(NULL)
                 } else {
-                  limits[[tkr]] <- NULL  # remove limit
+                  lim <- list()
+                  if (!is.null(val$ticker)) {
+                    # Single item (flat)
+                    lim[[val$ticker]] <- as.numeric(val$max)
+                  } else if (is.list(val)) {
+                    for (item in val) {
+                      if (is.list(item) && !is.null(item$ticker)) {
+                        lim[[item$ticker]] <- as.numeric(item$max)
+                      }
+                    }
+                  }
+                  r_ticker_limits(
+                    if (length(lim) > 0) lim else NULL)
                 }
-                if (length(limits) == 0) limits <- NULL
-                r_ticker_limits(limits)
               }
             )
           })
@@ -79,33 +86,6 @@ new_portfolio_optimizer_block <- function(
               list(id = session$ns("pos_limits"),
                 tickers = ticker_list))
           })
-
-          # Handle position limits input from JS table
-          shiny::observeEvent(input$pos_limits, {
-            val <- input$pos_limits
-            if (is.null(val) || length(val) == 0) {
-              r_ticker_limits(NULL)
-              return()
-            }
-            # val comes from JS as a list of {ticker, max} objects
-            # Shiny may deliver it in different formats
-            limits <- tryCatch({
-              lim <- list()
-              if (is.list(val) && !is.null(val[[1]]$ticker)) {
-                # List of lists: [{ticker:"EWT", max:0.05}, ...]
-                for (item in val) {
-                  lim[[item$ticker]] <- as.numeric(item$max)
-                }
-              } else if (is.data.frame(val)) {
-                # Data frame with ticker and max columns
-                for (i in seq_len(nrow(val))) {
-                  lim[[val$ticker[i]]] <- as.numeric(val$max[i])
-                }
-              }
-              if (length(lim) > 0) lim else NULL
-            }, error = function(e) NULL)
-            r_ticker_limits(limits)
-          }, ignoreNULL = FALSE)
 
           list(
             expr = shiny::reactive({
@@ -178,11 +158,11 @@ new_portfolio_optimizer_block <- function(
             )
           ),
 
-          # Constraints
+          # Position Limits
           shiny::div(class = "opt-group",
-            shiny::div(class = "opt-label", "Constraints"),
+            shiny::div(class = "opt-label", "Position Limits"),
 
-            # Max weight toggle + input
+            # Default max weight
             shiny::div(class = "opt-constraint-row",
               shiny::tags$label(class = "opt-toggle-label",
                 shiny::tags$input(
@@ -191,7 +171,7 @@ new_portfolio_optimizer_block <- function(
                   `data-param` = "max_weight_toggle",
                   checked = if (!is.na(max_weight)) NA else NULL
                 ),
-                "Max position weight"
+                "Default max per ETF"
               ),
               shiny::tags$input(
                 type = "number",
@@ -205,7 +185,18 @@ new_portfolio_optimizer_block <- function(
               shiny::span(class = "opt-unit", "%")
             ),
 
-            # Max positions: Auto / Custom / Off
+            # Per-position overrides (search + table)
+            shiny::div(
+              id = ns("pos_limits"),
+              class = "pl-container",
+              `data-state` = as.character(limits_state),
+              `data-ctrl-id` = ns("opt_ctrl")
+            )
+          ),
+
+          # Max positions
+          shiny::div(class = "opt-group",
+            shiny::div(class = "opt-label", "Portfolio Size"),
             shiny::div(class = "opt-constraint-row",
               shiny::span(class = "opt-constraint-label",
                 "Max ETFs"),
@@ -236,12 +227,6 @@ new_portfolio_optimizer_block <- function(
             )
           ),
 
-          # Per-position limits table
-          shiny::div(
-            id = ns("pos_limits"),
-            class = "pl-container",
-            `data-state` = as.character(limits_state)
-          )
         ),
 
         shiny::tags$script(shiny::HTML(paste0("

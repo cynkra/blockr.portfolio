@@ -185,6 +185,18 @@ class PositionLimits {
   }
 
   _submit() {
+    // Send through the opt_ctrl handler using the ctrlId stored on the element
+    var ctrlId = this.el.dataset.ctrlId;
+    if (ctrlId && typeof Shiny !== 'undefined') {
+      var result = [];
+      for (var k in this.limits) {
+        result.push({ticker: k, max: this.limits[k]});
+      }
+      Shiny.setInputValue(ctrlId, {
+        param: 'ticker_limits',
+        value: result.length > 0 ? result : null
+      }, {priority: 'event'});
+    }
     if (this._callback) this._callback();
   }
 
