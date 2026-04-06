@@ -251,18 +251,4 @@ ip_css <- function() {
   "
 }
 
-# -- S3 methods ----------------------------------------------------------------
-
-#' @importFrom blockr.core block_ui
-#' @method block_ui investor_profile_block
-#' @export
-block_ui.investor_profile_block <- function(id, x, ...) {
-  shiny::tagList()
-}
-
-#' @importFrom blockr.core block_output
-#' @method block_output investor_profile_block
-#' @export
-block_output.investor_profile_block <- function(x, result, session) {
-  DT::renderDT(result, options = list(dom = "t", pageLength = 1))
-}
+# S3 methods: use default data_block output (html_table_preview via blockr.extra)

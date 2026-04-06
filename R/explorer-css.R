@@ -33,18 +33,39 @@ se_explorer_css <- function() {
   color: #6b7280; display: none; z-index: 10;
 }
 .se-layout.sidebar-collapsed .se-expand-btn { display: flex; }
-.se-ticker-section { padding: 12px 16px; border-bottom: 1px solid #e5e7eb; }
-.se-ticker-select {
-  width: 100%; padding: 8px 10px; border: 1px solid #d1d5db;
-  border-radius: 6px; font-size: 14px; font-family: inherit;
-  background: #fff; color: #111827; cursor: pointer;
+.se-ticker-section { padding: 8px 16px; border-bottom: 1px solid #e5e7eb; }
+/* Ticker card list */
+.se-tkr-list {
+  display: flex; flex-direction: column; gap: 4px;
+  max-height: 200px; overflow-y: auto;
 }
-.se-ticker-select:focus { outline: none; border-color: #3b82f6;
-  box-shadow: 0 0 0 2px rgba(59,130,246,0.15); }
-.se-ticker-card {
-  margin-top: 10px; padding: 10px 12px; background: #fff;
-  border: 1px solid #e5e7eb; border-radius: 8px;
+.se-tkr-list::-webkit-scrollbar { width: 5px; }
+.se-tkr-list::-webkit-scrollbar-thumb {
+  background: #d1d5db; border-radius: 3px;
 }
+.se-tkr-card {
+  padding: 8px 10px; border: 1px solid #e5e7eb; border-radius: 6px;
+  background: #fff; cursor: pointer; transition: all 0.12s;
+}
+.se-tkr-card:hover { background: #f9fafb; border-color: #d1d5db; }
+.se-tkr-card.is-active {
+  background: #eff6ff; border-color: #93c5fd;
+  box-shadow: 0 0 0 1px rgba(59,130,246,0.15);
+}
+.se-tkr-card-header {
+  display: flex; align-items: baseline; justify-content: space-between;
+}
+.se-tkr-symbol {
+  font-size: 13px; font-weight: 700; color: #111827;
+  letter-spacing: 0.3px;
+}
+.se-tkr-price { font-size: 13px; font-weight: 600; color: #111827; }
+.se-tkr-change {
+  font-size: 11px; margin-top: 1px;
+}
+.se-tkr-change.positive { color: #059669; }
+.se-tkr-change.negative { color: #dc2626; }
+/* Legacy (keep for compat) */
 .se-ticker-name { font-size: 14px; font-weight: 600; color: #111827; }
 .se-ticker-price { font-size: 20px; font-weight: 600; color: #111827;
   margin-top: 4px; }

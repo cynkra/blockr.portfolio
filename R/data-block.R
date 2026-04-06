@@ -59,29 +59,4 @@ new_portfolio_data_block <- function(...) {
   )
 }
 
-#' @method block_output portfolio_data_block
-#' @export
-block_output.portfolio_data_block <- function(x, result, session) {
-  DiagrammeR::renderGrViz({
-    if (!inherits(result, "dm")) return(NULL)
-    dm::dm_draw(result, view_type = "keys_only")
-  })
-}
-
-#' @method block_ui portfolio_data_block
-#' @export
-block_ui.portfolio_data_block <- function(id, x, ...) {
-  shiny::tagList(
-    DiagrammeR::grVizOutput(shiny::NS(id, "result"), height = "300px")
-  )
-}
-
-#' @importFrom blockr.core block_render_trigger
-#' @method block_render_trigger portfolio_data_block
-#' @export
-block_render_trigger.portfolio_data_block <- function(
-    x,
-    session = blockr.core::get_session()
-) {
-  NULL
-}
+# S3 methods: inherit from dm_block for clickable dm diagram output

@@ -32,4 +32,5 @@ A data block of class \code{ticker_data_block}
 \description{
 A data block that fetches OHLC price data for one or more tickers
 via quantmod. Falls back to bundled data when offline.
+Includes a searchable ticker table with Yahoo Finance autocomplete.
 }

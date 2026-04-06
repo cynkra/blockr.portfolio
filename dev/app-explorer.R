@@ -2,7 +2,6 @@
 #
 # Pipeline:
 #   ticker_data → explorer
-#
 pkgload::load_all("blockr.core")
 pkgload::load_all("blockr.dock")
 pkgload::load_all("blockr.dm")
@@ -14,8 +13,17 @@ options(
   blockr.html_table_preview = TRUE
 )
 
-board <- new_explorer_board(
-  tickers = c("AAPL", "MSFT", "GOOG", "AMZN", "TSLA"),
+board <- blockr.dock::new_dock_board(
+  blocks = c(
+    data = new_ticker_data_block(
+      tickers = c("AAPL", "MSFT", "GOOG", "AMZN", "TSLA")
+    ),
+    explorer = new_share_explorer_block()
+  ),
+  links = blockr.core::links(
+    from = "data",
+    to = "explorer"
+  ),
   extensions = list(
     blockr.dag::new_dag_extension()
   )
