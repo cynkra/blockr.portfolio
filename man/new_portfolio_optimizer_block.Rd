@@ -5,16 +5,13 @@
 \title{Portfolio Optimizer Block}
 \usage{
 new_portfolio_optimizer_block(
-  strategy = "mean_variance",
-  max_weight = NA_real_,
-  max_positions = NA_integer_,
+  state = list(strategy = "mean_variance", max_weight = NA_real_, max_positions = -1L,
+    ticker_limits = list()),
   ...
 )
 }
 \arguments{
-\item{max_weight}{Maximum position weight (0-1), NA = no limit}
-
-\item{max_positions}{Maximum number of ETFs, NA = no limit}
+\item{state}{List with strategy, max_weight, max_positions, ticker_limits}
 
 \item{...}{Forwarded to \code{\link[blockr.core:new_transform_block]{blockr.core::new_transform_block()}}}
 }
@@ -23,6 +20,5 @@ A transform block of class \code{portfolio_optimizer_block}
 }
 \description{
 A transform block with two inputs (data dm + investor profile data frame).
-Runs portfolio optimization and returns an enriched dm with result tables.
-Always runs all 4 strategies for comparison.
+Uses the JS-first pattern: single state object flows bidirectionally.
 }

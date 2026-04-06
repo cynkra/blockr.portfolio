@@ -6,9 +6,9 @@
 \usage{
 new_ticker_data_block(
   tickers = "AAPL",
-  from = Sys.Date() - 365,
+  from = as.Date("2000-01-01"),
   to = Sys.Date(),
-  periodicity = "daily",
+  periodicity = "monthly",
   source = "yahoo",
   ...
 )

@@ -82,8 +82,10 @@ pf_optimize <- function(returns_xts, strategy, constraints) {
       }
     }
   }
+  min_vec <- rep(0, length(funds))
+  names(min_vec) <- funds
   pspec <- PortfolioAnalytics::add.constraint(pspec, type = "box",
-    min = 0, max = max_vec)
+    min = min_vec, max = max_vec)
 
   # Group constraints
   non_empty <- lengths(constraints$groups) > 0
@@ -137,6 +139,14 @@ pf_optimize <- function(returns_xts, strategy, constraints) {
       list(weights = w)
     }
   )
+
+  # Guard: if optimizer returned NA weights, fall back to equal weight
+  if (!is.null(result$weights) && any(is.na(result$weights))) {
+    message("Optimizer returned NA weights, falling back to equal weight")
+    w <- rep(1 / length(funds), length(funds))
+    names(w) <- funds
+    result$weights <- w
+  }
 
   result
 }
@@ -306,8 +316,10 @@ pf_to_xts <- function(returns_df) {
 #' @return Cleaned weights
 #' @noRd
 pf_clean_weights <- function(weights) {
+  weights[is.na(weights)] <- 0
   weights[weights < 1e-6] <- 0
-  if (sum(weights) > 0) weights <- weights / sum(weights)
+  s <- sum(weights)
+  if (!is.na(s) && s > 0) weights <- weights / s
   weights
 }
 

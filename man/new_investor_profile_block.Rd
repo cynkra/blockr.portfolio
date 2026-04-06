@@ -6,25 +6,34 @@
 \usage{
 new_investor_profile_block(
   age = 35L,
-  family = "single",
+  has_dependents = FALSE,
   amount = 50000,
   currency = "USD",
+  risk_slider = NULL,
+  horizon_slider = NULL,
   ...
 )
 }
 \arguments{
-\item{age}{Investor age (18-100)}
+\item{age}{Investor age (18-100), used to suggest risk/horizon defaults}
 
-\item{family}{Family status: "single", "married", "married_kids", "retired"}
+\item{amount}{Investment amount}
 
-\item{amount}{Investment amount in dollars}
+\item{currency}{Base currency: "USD", "CHF", "EUR"}
+
+\item{risk_slider}{Risk preference 0-100 (NULL = derive from age/family)}
+
+\item{horizon_slider}{Horizon preference 0-100 (NULL = derive from age)}
 
 \item{...}{Forwarded to \code{\link[blockr.core:new_data_block]{blockr.core::new_data_block()}}}
+
+\item{family}{Family status, used to suggest risk defaults}
 }
 \value{
 A data block of class \code{investor_profile_block}
 }
 \description{
-A data block that captures investor personal details and outputs
-a one-row data frame with derived financial parameters.
+A data block that captures investor preferences and outputs
+a one-row data frame with currency, risk (0-100), horizon (0-100),
+and investment amount.
 }
