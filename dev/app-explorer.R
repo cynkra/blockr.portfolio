@@ -16,7 +16,7 @@ options(
 board <- blockr.dock::new_dock_board(
   blocks = c(
     data = new_ticker_data_block(
-      tickers = c("AAPL", "MSFT", "GOOG", "AMZN", "TSLA")
+      tickers = c("AAPL", "MSFT", "GOOG", "AMZN")
     ),
     explorer = new_share_explorer_block()
   ),

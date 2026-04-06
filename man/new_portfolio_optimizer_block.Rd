@@ -5,18 +5,16 @@
 \title{Portfolio Optimizer Block}
 \usage{
 new_portfolio_optimizer_block(
-  benchmark = "60_40",
-  max_weight = 0.25,
-  compare = character(0),
+  strategy = "mean_variance",
+  max_weight = NA_real_,
+  max_positions = NA_integer_,
   ...
 )
 }
 \arguments{
-\item{benchmark}{Benchmark: "60_40", "equal_weight", "sp500"}
+\item{max_weight}{Maximum position weight (0-1), NA = no limit}
 
-\item{max_weight}{Maximum position weight (0-1)}
-
-\item{compare}{Character vector of strategy IDs for comparison}
+\item{max_positions}{Maximum number of ETFs, NA = no limit}
 
 \item{...}{Forwarded to \code{\link[blockr.core:new_transform_block]{blockr.core::new_transform_block()}}}
 }
@@ -26,4 +24,5 @@ A transform block of class \code{portfolio_optimizer_block}
 \description{
 A transform block with two inputs (data dm + investor profile data frame).
 Runs portfolio optimization and returns an enriched dm with result tables.
+Always runs all 4 strategies for comparison.
 }

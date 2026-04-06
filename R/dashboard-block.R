@@ -62,17 +62,17 @@ new_portfolio_dashboard_block <- function(
               "metrics" %in% names(tbls)
             )
 
-            # Convert dm tables back to the format panels expect
+            # Convert dm tables to the format panels expect
             weights_df <- as.data.frame(tbls[["weights"]])
             bt_df <- as.data.frame(tbls[["backtest"]])
             metrics_df <- as.data.frame(tbls[["metrics"]])
             meta <- if ("metadata" %in% names(tbls))
               as.data.frame(tbls[["metadata"]]) else NULL
 
-            # Weights as named numeric vector (panels expect this)
+            # Weights as named numeric vector
             w <- stats::setNames(weights_df$weight, weights_df$ticker)
 
-            # Backtest as list with xts objects (panels expect this)
+            # Backtest as list with xts objects
             bt_dates <- as.Date(bt_df$date)
             backtest_list <- list(
               returns = xts::xts(bt_df$return, order.by = bt_dates),
@@ -86,25 +86,6 @@ new_portfolio_dashboard_block <- function(
               drawdown = xts::xts(bt_df$drawdown, order.by = bt_dates)
             )
 
-            # Benchmark backtest
-            bench_list <- NULL
-            if ("bench_backtest" %in% names(tbls)) {
-              bb_df <- as.data.frame(tbls[["bench_backtest"]])
-              bb_dates <- as.Date(bb_df$date)
-              bench_list <- list(
-                returns = xts::xts(bb_df$return,
-                  order.by = bb_dates),
-                cumulative = xts::xts(bb_df$cumulative,
-                  order.by = bb_dates),
-                ann_return = metrics_df$bench_ann_return[1],
-                ann_vol = metrics_df$bench_ann_vol[1],
-                sharpe = metrics_df$bench_sharpe[1],
-                max_dd = metrics_df$bench_max_dd[1],
-                drawdown = xts::xts(bb_df$drawdown,
-                  order.by = bb_dates)
-              )
-            }
-
             # Frontier
             frontier_data <- NULL
             if ("frontier" %in% names(tbls) &&
@@ -115,42 +96,15 @@ new_portfolio_dashboard_block <- function(
               )
             }
 
-            # Comparison: reshape to named list per strategy
-            comparison_list <- NULL
-            if ("comparison_backtest" %in% names(tbls)) {
-              comp_df <- as.data.frame(
-                tbls[["comparison_backtest"]])
-              strats <- unique(comp_df$strategy)
-              comparison_list <- lapply(
-                stats::setNames(strats, strats), function(s) {
-                  sdf <- comp_df[comp_df$strategy == s, ]
-                  sdates <- as.Date(sdf$date)
-                  list(
-                    weights = NULL,
-                    backtest = list(
-                      returns = xts::xts(sdf$return,
-                        order.by = sdates),
-                      cumulative = xts::xts(sdf$cumulative,
-                        order.by = sdates),
-                      ann_return = sdf$ann_return[1],
-                      ann_vol = sdf$ann_vol[1],
-                      sharpe = sdf$sharpe[1],
-                      max_dd = sdf$max_dd[1],
-                      var_95 = sdf$var_95[1]
-                    )
-                  )
-                })
-            }
-
             list(
               weights = w,
               backtest = backtest_list,
-              benchmark = bench_list,
+              benchmark = NULL,
               frontier = frontier_data,
               risk_contrib = if ("risk_contrib" %in% names(tbls))
                 as.data.frame(tbls[["risk_contrib"]]) else NULL,
               metadata = meta,
-              comparison = comparison_list,
+              comparison = NULL,
               strategy = metrics_df$strategy[1],
               returns_xts = NULL
             )

@@ -152,9 +152,10 @@ class TickerTable {
       const tdSource = document.createElement('td');
       tdSource.className = 'tt-col-source';
       const dot = document.createElement('span');
+      var isCatalog = t.source === 'bundled' || t.source === 'catalog';
       dot.className = 'tt-source-dot ' +
-        (t.source === 'bundled' ? 'tt-source-bundled' : 'tt-source-live');
-      dot.title = t.source === 'bundled' ? 'Bundled data available' : 'Live data';
+        (isCatalog ? 'tt-source-bundled' : 'tt-source-live');
+      dot.title = isCatalog ? 'In catalog' : 'Live data';
       tdSource.appendChild(dot);
       tr.appendChild(tdSource);
 

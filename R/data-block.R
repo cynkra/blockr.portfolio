@@ -50,7 +50,7 @@ new_portfolio_data_block <- function(...) {
       shiny::tagList(
         shiny::div(
           style = "padding: 8px 12px; font-size: 13px; color: #6b7280;",
-          "Portfolio Universe (16 ETFs, 10yr monthly returns)"
+          "Portfolio Universe (34 ETFs, 10yr monthly returns, global coverage)"
         )
       )
     },

@@ -4,7 +4,13 @@
 \alias{new_investor_profile_block}
 \title{Investor Profile Block}
 \usage{
-new_investor_profile_block(age = 35L, family = "single", amount = 50000, ...)
+new_investor_profile_block(
+  age = 35L,
+  family = "single",
+  amount = 50000,
+  currency = "USD",
+  ...
+)
 }
 \arguments{
 \item{age}{Investor age (18-100)}

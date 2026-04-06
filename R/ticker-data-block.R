@@ -21,16 +21,21 @@ new_ticker_data_block <- function(
     source = "yahoo",
     ...) {
 
-  # Build initial ticker list from bundled metadata
-  bundled <- pf_bundled_tickers()
-  initial_tickers <- lapply(seq_len(nrow(bundled)), function(i) {
-    list(
-      ticker = bundled$ticker[i],
-      name = bundled$name[i],
-      sector = if ("sub_class" %in% names(bundled)) bundled$sub_class[i]
-        else "",
-      source = "bundled"
-    )
+  # Build initial ticker list from catalog (only the selected tickers)
+  catalog <- pf_ticker_catalog()
+  initial_tickers <- lapply(tickers, function(tkr) {
+    row <- catalog[catalog$ticker == tkr, , drop = FALSE]
+    if (nrow(row) > 0) {
+      list(
+        ticker = row$ticker[1],
+        name = row$name[1],
+        sector = if (row$type[1] == "ETF") "ETF"
+          else if (nzchar(row$country[1])) row$country[1] else "",
+        source = "catalog"
+      )
+    } else {
+      list(ticker = tkr, name = tkr, sector = "", source = "live")
+    }
   })
 
   blockr.core::new_data_block(
@@ -52,19 +57,18 @@ new_ticker_data_block <- function(
             }
           }, ignoreNULL = FALSE)
 
-          # Server-side search: Yahoo Finance lookup
+          # Server-side search: catalog + Yahoo fallback
           shiny::observeEvent(input$ticker_table_search, {
             query <- input$ticker_table_search
             if (is.null(query) || nchar(query) < 2) return()
-            results <- pf_search_tickers(query, limit = 15)
-            if (nrow(results) == 0) return()
+            results <- pf_search_tickers(query, limit = 20)
+            if (is.null(results) || nrow(results) == 0) return()
             ticker_list <- lapply(seq_len(nrow(results)), function(i) {
               list(
                 ticker = results$ticker[i],
                 name = results$name[i],
-                sector = if ("type" %in% names(results))
-                  results$type[i] else "",
-                source = "yahoo"
+                sector = results$sector[i],
+                source = results$source[i]
               )
             })
             session$sendCustomMessage("ticker-table-results", list(

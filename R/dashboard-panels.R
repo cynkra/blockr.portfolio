@@ -107,9 +107,11 @@ allocation_panel <- function() {
               color = unname(class_colors[cls] %||% "#6b7280")
             ),
             children = lapply(seq_len(nrow(sub)), function(i) {
+              etf_name <- sub$name[i]
+              if (is.na(etf_name)) etf_name <- sub$ticker[i]
               list(
-                name = paste0(sub$ticker[i], "\n",
-                  round(sub$weight[i] * 100, 1), "%"),
+                name = paste0(sub$ticker[i], "\n", etf_name,
+                  "\n", round(sub$weight[i] * 100, 1), "%"),
                 value = round(sub$weight[i] * 100, 1)
               )
             })
@@ -121,7 +123,7 @@ allocation_panel <- function() {
             backgroundColor = "transparent",
             tooltip = list(
               formatter = htmlwidgets::JS(
-                "function(p){return p.name+': '+p.value+'%';}"
+                "function(p){var parts=p.name.split('\\n'); var ticker=parts[0]||''; var name=parts[1]||''; var weight=p.value; return '<b>'+ticker+'</b><br>'+name+'<br>'+weight+'%';}"
               )
             ),
             series = list(list(

@@ -26,6 +26,8 @@ Imports:
     PerformanceAnalytics,
     PortfolioAnalytics,
     quantmod,
+    ROI,
+    ROI.plugin.quadprog,
     shiny,
     stats,
     utils,
@@ -34,8 +36,6 @@ Imports:
 Suggests:
     blockr.ai,
     blockr.dock,
-    ROI,
-    ROI.plugin.quadprog,
     DEoptim,
     testthat (>= 3.0.0)
 Config/testthat/edition: 3

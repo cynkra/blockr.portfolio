@@ -86,7 +86,7 @@ pf_bundled_ohlc <- function(tickers, from, to) {
   ohlc
 }
 
-#' Get bundled ticker metadata
+#' Get bundled ticker metadata (portfolio ETFs only)
 #'
 #' @return Data frame with ticker, name, type columns
 #' @noRd
@@ -108,27 +108,90 @@ pf_bundled_tickers <- function() {
   meta[, cols, drop = FALSE]
 }
 
-#' Search for tickers via bundled data + Yahoo Finance
+#' Comprehensive global ticker catalog
 #'
-#' @param query Search string (e.g., "apple", "aapl")
-#' @param limit Max results
-#' @return Data frame with ticker, name, type columns
+#' Loaded once into memory from inst/extdata/ticker_catalog.rds.
+#' Contains ~42K tickers across 23 exchanges (US, Europe, Asia).
+#'
+#' @return Data frame with ticker, name, exchange, country, type, isin
 #' @noRd
-pf_search_tickers <- function(query, limit = 15) {
-  if (is.null(query) || !nzchar(trimws(query))) {
-    return(pf_bundled_tickers())
-  }
+pf_ticker_catalog <- function() {
+  cache <- .pf_catalog_env$catalog
+  if (!is.null(cache)) return(cache)
+  rds_path <- system.file("extdata", "ticker_catalog.rds",
+    package = "blockr.portfolio")
+  if (rds_path == "") return(data.frame(
+    ticker = character(0), name = character(0), exchange = character(0),
+    country = character(0), type = character(0), isin = character(0),
+    stringsAsFactors = FALSE
+  ))
+  .pf_catalog_env$catalog <- readRDS(rds_path)
+  .pf_catalog_env$catalog
+}
+
+# Package-level cache for the ticker catalog
+.pf_catalog_env <- new.env(parent = emptyenv())
+
+#' Search for tickers via catalog + Yahoo Finance fallback
+#'
+#' Searches the global ticker catalog (~42K tickers) first.
+#' Falls back to Yahoo Finance for anything not in the catalog.
+#'
+#' @param query Search string (e.g., "apple", "roche", "RO.SW")
+#' @param limit Max results
+#' @return Data frame with ticker, name, sector, source columns
+#' @noRd
+pf_search_tickers <- function(query, limit = 20) {
+  if (is.null(query) || !nzchar(trimws(query))) return(NULL)
   query_lower <- tolower(trimws(query))
 
-  # Match bundled tickers
-  bundled <- pf_bundled_tickers()
-  bundled_match <- bundled[
-    grepl(query_lower, tolower(bundled$ticker), fixed = TRUE) |
-    grepl(query_lower, tolower(bundled$name), fixed = TRUE),
-  , drop = FALSE]
+  # Search the comprehensive catalog
+  catalog <- pf_ticker_catalog()
+  if (nrow(catalog) > 0) {
+    tickers_lower <- tolower(catalog$ticker)
+    names_lower <- tolower(catalog$name)
+    countries_lower <- tolower(catalog$country)
 
-  # Live search via Yahoo Finance
-  live <- tryCatch({
+    # Score: 1 = exact ticker, 2 = ticker starts with query,
+    #        3 = word-boundary match in name, 4 = substring match
+    exact_ticker <- tickers_lower == query_lower
+    starts_ticker <- startsWith(tickers_lower, query_lower) |
+      startsWith(tickers_lower, paste0(query_lower, "."))
+    # Word boundary: query appears after start-of-string or non-letter
+    word_pat <- paste0("(^|[^a-z])", query_lower)
+    word_name <- grepl(word_pat, names_lower)
+    substr_match <- grepl(query_lower, tickers_lower, fixed = TRUE) |
+      grepl(query_lower, names_lower, fixed = TRUE) |
+      grepl(query_lower, countries_lower, fixed = TRUE)
+
+    hit <- exact_ticker | starts_ticker | word_name | substr_match
+    if (!any(hit)) hit <- rep(FALSE, nrow(catalog))
+
+    score <- ifelse(exact_ticker, 1L,
+      ifelse(starts_ticker, 2L,
+        ifelse(word_name, 3L, 4L)))
+
+    matches <- catalog[hit, , drop = FALSE]
+    scores <- score[hit]
+    matches <- matches[order(scores, matches$ticker), ]
+    matches <- utils::head(matches, limit)
+    if (nrow(matches) > 0) {
+      result <- data.frame(
+        ticker = matches$ticker,
+        name = matches$name,
+        sector = ifelse(
+          matches$type == "ETF", "ETF",
+          ifelse(nzchar(matches$country), matches$country, matches$exchange)
+        ),
+        source = "catalog",
+        stringsAsFactors = FALSE
+      )
+      return(result)
+    }
+  }
+
+  # Fallback: Yahoo Finance live search
+  tryCatch({
     url <- paste0(
       "https://query2.finance.yahoo.com/v1/finance/search?q=",
       utils::URLencode(query),
@@ -136,27 +199,16 @@ pf_search_tickers <- function(query, limit = 15) {
       "&newsCount=0"
     )
     resp <- jsonlite::fromJSON(url, simplifyDataFrame = TRUE)
-    if (is.null(resp$quotes) || nrow(resp$quotes) == 0) {
-      data.frame(ticker = character(0), name = character(0),
-        type = character(0), stringsAsFactors = FALSE)
-    } else {
-      q <- resp$quotes
-      data.frame(
-        ticker = q$symbol,
-        name = q$shortname %||% q$symbol,
-        type = q$quoteType %||% "EQUITY",
-        stringsAsFactors = FALSE
-      )
-    }
-  }, error = function(e) {
-    data.frame(ticker = character(0), name = character(0),
-      type = character(0), stringsAsFactors = FALSE)
-  })
-
-  # Combine, deduplicate, limit
-  combined <- rbind(bundled_match, live)
-  combined <- combined[!duplicated(combined$ticker), , drop = FALSE]
-  utils::head(combined, limit)
+    if (is.null(resp$quotes) || nrow(resp$quotes) == 0) return(NULL)
+    q <- resp$quotes
+    data.frame(
+      ticker = q$symbol,
+      name = q$shortname %||% q$symbol,
+      sector = q$quoteType %||% "EQUITY",
+      source = "yahoo",
+      stringsAsFactors = FALSE
+    )
+  }, error = function(e) NULL)
 }
 
 #' Build a dm from OHLC data and metadata

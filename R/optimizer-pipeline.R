@@ -10,36 +10,25 @@
 #' @param metadata Data frame with ticker and asset_class columns
 #' @return List of constraint parameters
 #' @noRd
-pf_build_constraints <- function(risk, horizon, max_weight, min_positions,
+pf_build_constraints <- function(risk_val, horizon_val, max_weight,
                                   metadata) {
-  risk_aversion <- switch(risk,
-    conservative = 10,
-    moderate = 2,
-    aggressive = 0.5,
-    2
-  )
+  # Continuous mapping from 0-100 values to optimization parameters
+  # Risk aversion: exponential scale (0→20, 50→2, 100→0.1)
+  risk_val <- max(0, min(100, as.numeric(risk_val)))
+  horizon_val <- max(0, min(100, as.numeric(horizon_val)))
 
-  equity_max <- switch(risk,
-    conservative = 0.40,
-    moderate = 0.70,
-    aggressive = 1.0,
-    0.70
-  )
-  alt_max <- switch(risk,
-    conservative = 0.10,
-    moderate = 0.25,
-    aggressive = 0.50,
-    0.25
-  )
+  risk_aversion <- 20 * exp(-4.6 * risk_val / 100)
 
-  horizon_adj <- switch(horizon,
-    short = -0.10,
-    medium = 0,
-    long = 0.10,
-    0
-  )
+  # Equity cap: 0.30 (conservative) to 1.0 (aggressive)
+  equity_max <- 0.30 + 0.70 * risk_val / 100
+
+  # Alternatives cap: 0.05 (conservative) to 0.50 (aggressive)
+  alt_max <- 0.05 + 0.45 * risk_val / 100
+
+  # Horizon adjustment: -0.20 (short) to +0.20 (long)
+  horizon_adj <- -0.20 + 0.40 * horizon_val / 100
   equity_max <- min(1, equity_max + horizon_adj)
-  alt_max <- min(1, alt_max + horizon_adj)
+  alt_max <- min(1, max(0, alt_max + horizon_adj))
 
   tickers <- metadata$ticker
   equity_idx <- which(metadata$asset_class == "Equity")
@@ -47,10 +36,12 @@ pf_build_constraints <- function(risk, horizon, max_weight, min_positions,
   alt_idx <- which(metadata$asset_class %in%
     c("Real Estate", "Commodity", "Crypto"))
 
+  # NA means no constraint → use 1.0
+  effective_max_weight <- if (is.na(max_weight)) 1.0 else max_weight
+
   list(
     risk_aversion = risk_aversion,
-    max_weight = max_weight,
-    min_positions = min_positions,
+    max_weight = effective_max_weight,
     groups = list(equity = equity_idx, bonds = bond_idx,
       alternatives = alt_idx),
     group_max = c(equity_max, 1.0, alt_max),
@@ -67,6 +58,15 @@ pf_build_constraints <- function(risk, horizon, max_weight, min_positions,
 #' @noRd
 pf_optimize <- function(returns_xts, strategy, constraints) {
   funds <- colnames(returns_xts)
+
+  # PortfolioAnalytics needs these in the search path (not just namespace)
+  if (!"package:ROI" %in% search())
+    suppressPackageStartupMessages(require(ROI, quietly = TRUE))
+  if (!"package:ROI.plugin.quadprog" %in% search())
+    suppressPackageStartupMessages(require(ROI.plugin.quadprog, quietly = TRUE))
+  if (!"package:PortfolioAnalytics" %in% search())
+    suppressPackageStartupMessages(require(PortfolioAnalytics, quietly = TRUE))
+
   pspec <- PortfolioAnalytics::portfolio.spec(assets = funds)
   pspec <- PortfolioAnalytics::add.constraint(pspec,
     type = "full_investment")
@@ -119,6 +119,7 @@ pf_optimize <- function(returns_xts, strategy, constraints) {
       }
     ),
     error = function(e) {
+      message("Portfolio optimization failed: ", conditionMessage(e))
       w <- rep(1 / length(funds), length(funds))
       names(w) <- funds
       list(weights = w)
@@ -175,9 +176,17 @@ pf_benchmark_weights <- function(benchmark, metadata, returns_xts) {
 
   switch(benchmark,
     "60_40" = {
-      spy_idx <- match("SPY", tickers)
+      vti_idx <- match("VTI", tickers)
       agg_idx <- match("AGG", tickers)
-      if (!is.na(spy_idx)) w[spy_idx] <- 0.6
+      if (!is.na(vti_idx)) w[vti_idx] <- 0.6
+      if (!is.na(agg_idx)) w[agg_idx] <- 0.4
+      if (sum(w) == 0) w <- rep(1 / length(w), length(w))
+      w <- w / sum(w)
+    },
+    global_60_40 = {
+      vt_idx <- match("VT", tickers)
+      agg_idx <- match("AGG", tickers)
+      if (!is.na(vt_idx)) w[vt_idx] <- 0.6
       if (!is.na(agg_idx)) w[agg_idx] <- 0.4
       if (sum(w) == 0) w <- rep(1 / length(w), length(w))
       w <- w / sum(w)
@@ -186,10 +195,10 @@ pf_benchmark_weights <- function(benchmark, metadata, returns_xts) {
       w <- rep(1 / length(tickers), length(tickers))
       names(w) <- tickers
     },
-    sp500 = {
-      spy_idx <- match("SPY", tickers)
-      if (!is.na(spy_idx)) {
-        w[spy_idx] <- 1
+    us_market = {
+      vti_idx <- match("VTI", tickers)
+      if (!is.na(vti_idx)) {
+        w[vti_idx] <- 1
       } else {
         w <- rep(1 / length(tickers), length(tickers))
       }
@@ -267,12 +276,15 @@ pf_to_xts <- function(returns_df) {
   mat <- as.matrix(wide[, -1, drop = FALSE])
   colnames(mat) <- sub("^return\\.", "", colnames(mat))
 
+  # Drop tickers with ALL NAs, but keep rows with some NAs
+  # (short-history tickers like BITO shouldn't limit the date range)
   keep <- apply(mat, 2, function(x) !all(is.na(x)))
   mat <- mat[, keep, drop = FALSE]
 
-  complete <- stats::complete.cases(mat)
-  mat <- mat[complete, , drop = FALSE]
-  dates <- dates[complete]
+  # Drop rows where ALL tickers are NA (no data at all)
+  any_data <- apply(mat, 1, function(x) !all(is.na(x)))
+  mat <- mat[any_data, , drop = FALSE]
+  dates <- dates[any_data]
 
   xts::xts(mat, order.by = dates)
 }
@@ -287,42 +299,133 @@ pf_clean_weights <- function(weights) {
   weights
 }
 
+#' Adjust returns to a target currency
+#'
+#' Converts USD-denominated returns to the investor's base currency.
+#' The FX returns are stored in the returns table as pseudo-tickers
+#' (.CHFUSD, .EURUSD).
+#'
+#' @param returns_xts xts with asset returns (USD-denominated)
+#' @param fx_xts xts with FX returns (e.g., .CHFUSD column)
+#' @param currency Target currency: "USD", "CHF", or "EUR"
+#' @return xts with currency-adjusted returns
+#' @noRd
+pf_adjust_currency <- function(returns_xts, fx_xts, currency) {
+  if (currency == "USD" || is.null(fx_xts)) return(returns_xts)
+
+  fx_col <- switch(currency,
+    CHF = ".CHFUSD",
+    EUR = ".EURUSD",
+    NULL
+  )
+  if (is.null(fx_col) || !fx_col %in% colnames(fx_xts)) {
+    return(returns_xts)
+  }
+
+  fx_ret <- fx_xts[, fx_col]
+
+  # Align by year-month (monthly data may have different day-of-month)
+  ret_ym <- format(zoo::index(returns_xts), "%Y-%m")
+  fx_ym <- format(zoo::index(fx_ret), "%Y-%m")
+  common_ym <- intersect(ret_ym, fx_ym)
+
+  ret_idx <- which(ret_ym %in% common_ym)
+  fx_idx <- which(fx_ym %in% common_ym)
+
+  # Match in order
+  ret_match <- match(ret_ym[ret_idx], fx_ym[fx_idx])
+  valid <- !is.na(ret_match)
+  ret_idx <- ret_idx[valid]
+  fx_idx <- fx_idx[ret_match[valid]]
+
+  adjusted <- returns_xts[ret_idx, ]
+  fx_vec <- as.numeric(fx_ret[fx_idx, ])
+
+  # Adjust: r_local = (1 + r_usd) * (1 + r_fx) - 1
+  for (col in colnames(adjusted)) {
+    vals <- as.numeric(adjusted[, col])
+    # Only adjust non-NA values
+    non_na <- !is.na(vals)
+    vals[non_na] <- (1 + vals[non_na]) * (1 + fx_vec[non_na]) - 1
+    adjusted[, col] <- vals
+  }
+  adjusted
+}
+
 #' Run the full optimization pipeline
 #'
 #' Orchestrates constraint building, optimization, backtesting, frontier,
 #' and risk contribution. Returns an enriched dm with result tables.
 #'
 #' @param dm_data dm object with metadata and returns tables
-#' @param profile One-row data frame with risk, horizon, strategy, min_positions
+#' @param profile One-row data frame with risk, horizon, strategy, min_positions, currency
 #' @param benchmark Character: "60_40", "equal_weight", or "sp500"
 #' @param max_weight Numeric: max position weight (0-1)
 #' @param compare Character vector of strategy IDs for comparison
 #' @return dm object enriched with result tables
 #' @noRd
-pf_run_optimizer <- function(dm_data, profile, benchmark = "60_40",
-                              max_weight = 0.25,
-                              compare = character(0)) {
+pf_run_optimizer <- function(dm_data, profile, strategy = "mean_variance",
+                              max_weight = NA_real_,
+                              max_positions = NA_integer_) {
   tbls <- dm::dm_get_tables(dm_data)
   metadata <- as.data.frame(tbls[["metadata"]])
   ret_df <- as.data.frame(tbls[["returns"]])
-  returns_xts <- pf_to_xts(ret_df)
 
+  # Separate FX returns from asset returns
+  fx_tickers <- metadata$ticker[metadata$type == "FX"]
+  asset_ret_df <- ret_df[!ret_df$ticker %in% fx_tickers, , drop = FALSE]
+  fx_ret_df <- ret_df[ret_df$ticker %in% fx_tickers, , drop = FALSE]
+
+  returns_xts <- pf_to_xts(asset_ret_df)
+  fx_xts <- if (nrow(fx_ret_df) > 0) pf_to_xts(fx_ret_df) else NULL
+
+  # Filter metadata to ETFs only (exclude FX)
+  metadata <- metadata[metadata$type != "FX" &
+    metadata$ticker %in% colnames(returns_xts), , drop = FALSE]
+
+  # Drop tickers with too many NAs (< 60 months of data)
+  # and use pairwise-complete date range for the rest
+  enough_data <- apply(returns_xts, 2, function(x) sum(!is.na(x)) >= 60)
+  returns_xts <- returns_xts[, enough_data, drop = FALSE]
   metadata <- metadata[metadata$ticker %in% colnames(returns_xts), ,
     drop = FALSE]
 
-  risk <- profile$risk[1]
-  horizon <- profile$horizon[1]
-  strategy <- profile$strategy[1]
-  min_positions <- as.integer(profile$min_positions[1])
+  # For PortfolioAnalytics: fill remaining NAs with 0 (rare, edge months)
+  returns_xts[is.na(returns_xts)] <- 0
 
-  constraints <- pf_build_constraints(risk, horizon, max_weight,
-    min_positions, metadata)
+  risk_val <- as.numeric(profile$risk[1])
+  horizon_val <- as.numeric(profile$horizon[1])
+  amount <- if ("amount" %in% colnames(profile))
+    as.numeric(profile$amount[1]) else NA_real_
+
+  # Auto-derive max_positions from amount if set to -1 (auto mode)
+  if (!is.na(max_positions) && max_positions == -1L && !is.na(amount)) {
+    max_positions <- if (amount < 10000) 3L
+      else if (amount < 50000) 5L
+      else if (amount < 200000) 8L
+      else if (amount < 500000) 12L
+      else NA_integer_  # no limit for large portfolios
+  }
+  currency <- if ("currency" %in% colnames(profile))
+    profile$currency[1] else "USD"
+
+  # Adjust returns to target currency
+  returns_xts <- pf_adjust_currency(returns_xts, fx_xts, currency)
+
+  constraints <- pf_build_constraints(risk_val, horizon_val,
+    max_weight, metadata)
   opt <- pf_optimize(returns_xts, strategy, constraints)
   weights <- pf_clean_weights(opt$weights)
 
+  # Limit to max_positions: keep top N by weight, zero the rest
+  if (!is.na(max_positions) && sum(weights > 0) > max_positions) {
+    ranked <- order(weights, decreasing = TRUE)
+    keep_idx <- ranked[seq_len(max_positions)]
+    weights[-keep_idx] <- 0
+    weights <- pf_clean_weights(weights)
+  }
+
   bt <- pf_backtest(returns_xts, weights)
-  bw <- pf_benchmark_weights(benchmark, metadata, returns_xts)
-  bench_bt <- pf_backtest(returns_xts, bw)
   frontier_data <- pf_efficient_frontier(returns_xts, constraints)
   risk_contrib_data <- pf_risk_contribution(returns_xts, weights)
 
@@ -339,58 +442,23 @@ pf_run_optimizer <- function(dm_data, profile, benchmark = "60_40",
     drawdown = as.numeric(bt$drawdown),
     stringsAsFactors = FALSE
   )
-  bench_backtest_df <- data.frame(
-    date = zoo::index(bench_bt$returns),
-    return = as.numeric(bench_bt$returns),
-    cumulative = as.numeric(bench_bt$cumulative),
-    drawdown = as.numeric(bench_bt$drawdown),
-    stringsAsFactors = FALSE
-  )
   metrics_df <- data.frame(
     strategy = strategy,
     ann_return = bt$ann_return, ann_vol = bt$ann_vol,
     sharpe = bt$sharpe, max_dd = bt$max_dd, var_95 = bt$var_95,
-    benchmark = benchmark,
-    bench_ann_return = bench_bt$ann_return,
-    bench_ann_vol = bench_bt$ann_vol,
-    bench_sharpe = bench_bt$sharpe,
-    bench_max_dd = bench_bt$max_dd,
     stringsAsFactors = FALSE
   )
-
-  comparison_df <- NULL
-  if (length(compare) > 0) {
-    comp_list <- lapply(compare, function(strat) {
-      comp_opt <- pf_optimize(returns_xts, strat, constraints)
-      comp_w <- pf_clean_weights(comp_opt$weights)
-      comp_bt <- pf_backtest(returns_xts, comp_w)
-      data.frame(
-        date = zoo::index(comp_bt$returns), strategy = strat,
-        return = as.numeric(comp_bt$returns),
-        cumulative = as.numeric(comp_bt$cumulative),
-        ann_return = comp_bt$ann_return, ann_vol = comp_bt$ann_vol,
-        sharpe = comp_bt$sharpe, max_dd = comp_bt$max_dd,
-        var_95 = comp_bt$var_95,
-        stringsAsFactors = FALSE
-      )
-    })
-    comparison_df <- do.call(rbind, comp_list)
-  }
 
   result_dm <- dm_data |>
     dm::dm(
       weights = weights_df, backtest = backtest_df,
-      bench_backtest = bench_backtest_df, metrics = metrics_df,
+      metrics = metrics_df,
       frontier = frontier_data$frontier, assets = frontier_data$assets,
       risk_contrib = risk_contrib_data
     ) |>
     dm::dm_add_fk(weights, ticker, metadata) |>
     dm::dm_add_fk(risk_contrib, ticker, metadata) |>
     dm::dm_add_fk(assets, ticker, metadata)
-
-  if (!is.null(comparison_df)) {
-    result_dm <- dm::dm(result_dm, comparison_backtest = comparison_df)
-  }
 
   result_dm
 }
