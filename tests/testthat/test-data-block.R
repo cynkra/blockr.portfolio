@@ -10,9 +10,10 @@ test_that("bundled dm loads correctly", {
   expect_true("returns" %in% names(tbls))
 
   meta <- as.data.frame(tbls[["metadata"]])
-  expect_true(all(c("ticker", "name", "asset_class", "region", "sub_class") %in%
-    colnames(meta)))
-  expect_equal(nrow(meta), 16L)
+  expect_true(all(c("ticker", "name", "asset_class", "region",
+    "sub_class") %in% colnames(meta)))
+  # 34 ETFs + 2 FX pairs = 36
+  expect_equal(nrow(meta), 36L)
 
   ret <- as.data.frame(tbls[["returns"]])
   expect_true(all(c("date", "ticker", "return") %in% colnames(ret)))

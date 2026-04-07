@@ -1,18 +1,20 @@
 test_that("pf_build_constraints maps risk and horizon correctly", {
   meta <- data.frame(
-    ticker = c("SPY", "AGG", "GLD"),
+    ticker = c("VTI", "AGG", "GLD"),
     asset_class = c("Equity", "Bond", "Commodity"),
     stringsAsFactors = FALSE
   )
 
+  # Conservative (risk=20) + short horizon (horizon=10)
   cons <- blockr.portfolio:::pf_build_constraints(
-    "conservative", "short", 0.25, 5L, meta)
-  expect_equal(cons$risk_aversion, 10)
-  expect_true(cons$group_max[1] <= 0.40) # equity max for conservative+short
+    20, 10, 0.25, meta)
+  expect_true(cons$risk_aversion > 5) # high aversion
+  expect_true(cons$group_max[1] < 0.50) # low equity cap
 
+  # Aggressive (risk=90) + long horizon (horizon=90)
   cons2 <- blockr.portfolio:::pf_build_constraints(
-    "aggressive", "long", 0.5, 3L, meta)
-  expect_equal(cons2$risk_aversion, 0.5)
+    90, 90, 0.5, meta)
+  expect_true(cons2$risk_aversion < 1) # low aversion
   expect_equal(cons2$max_weight, 0.5)
 })
 
@@ -22,18 +24,18 @@ test_that("pf_optimize returns valid weights", {
   set.seed(42)
   n <- 60
   mat <- matrix(rnorm(n * 3, mean = 0.005, sd = 0.04), nrow = n)
-  colnames(mat) <- c("SPY", "AGG", "GLD")
+  colnames(mat) <- c("VTI", "AGG", "GLD")
   returns_xts <- xts::xts(mat, order.by = seq.Date(
     as.Date("2020-01-01"), by = "month", length.out = n))
 
   meta <- data.frame(
-    ticker = c("SPY", "AGG", "GLD"),
+    ticker = c("VTI", "AGG", "GLD"),
     asset_class = c("Equity", "Bond", "Commodity"),
     stringsAsFactors = FALSE
   )
 
   constraints <- blockr.portfolio:::pf_build_constraints(
-    "moderate", "medium", 0.5, 1L, meta)
+    50, 50, 0.5, meta)
 
   # Equal weight
   opt_ew <- blockr.portfolio:::pf_optimize(returns_xts, "equal_weight",
@@ -71,28 +73,28 @@ test_that("pf_backtest computes expected metrics", {
 
 test_that("pf_benchmark_weights sums to 1", {
   meta <- data.frame(
-    ticker = c("SPY", "AGG", "GLD"),
+    ticker = c("VTI", "AGG", "GLD"),
     asset_class = c("Equity", "Bond", "Commodity"),
     stringsAsFactors = FALSE
   )
   mat <- matrix(0, nrow = 10, ncol = 3)
-  colnames(mat) <- c("SPY", "AGG", "GLD")
+  colnames(mat) <- c("VTI", "AGG", "GLD")
   returns_xts <- xts::xts(mat, order.by = seq.Date(
     as.Date("2024-01-01"), by = "month", length.out = 10))
 
   bw_6040 <- blockr.portfolio:::pf_benchmark_weights("60_40", meta,
     returns_xts)
   expect_equal(sum(bw_6040), 1)
-  expect_equal(bw_6040["SPY"], c(SPY = 0.6))
+  expect_equal(bw_6040["VTI"], c(VTI = 0.6))
 
   bw_ew <- blockr.portfolio:::pf_benchmark_weights("equal_weight", meta,
     returns_xts)
   expect_equal(sum(bw_ew), 1)
   expect_true(all(abs(bw_ew - 1/3) < 1e-6))
 
-  bw_sp <- blockr.portfolio:::pf_benchmark_weights("sp500", meta,
+  bw_us <- blockr.portfolio:::pf_benchmark_weights("us_market", meta,
     returns_xts)
-  expect_equal(bw_sp["SPY"], c(SPY = 1))
+  expect_equal(bw_us["VTI"], c(VTI = 1))
 })
 
 test_that("pf_risk_contribution sums approximately to 100", {
@@ -108,4 +110,24 @@ test_that("pf_risk_contribution sums approximately to 100", {
 
   expect_equal(nrow(rc), 3)
   expect_true(abs(sum(rc$contribution) - 100) < 5) # ~100%
+})
+
+test_that("per-ticker limits are enforced after max_positions", {
+  skip_if_not_installed("PortfolioAnalytics")
+
+  dm_obj <- readRDS(system.file("extdata", "portfolio_dm.rds",
+    package = "blockr.portfolio"))
+  profile <- data.frame(currency = "USD", risk = 81, horizon = 81,
+    amount = 50000, stringsAsFactors = FALSE)
+
+  w <- blockr.portfolio:::pf_run_optimizer(dm_obj, profile,
+    strategy = "mean_variance",
+    ticker_limits = list(VUG = 0.10))
+
+  # Result should be a dm
+  expect_s3_class(w, "dm")
+  wdf <- as.data.frame(dm::dm_get_tables(w)[["weights"]])
+  vug <- wdf$weight[wdf$ticker == "VUG"]
+  expect_true(length(vug) > 0)
+  expect_true(vug <= 0.101) # respects 10% limit
 })
