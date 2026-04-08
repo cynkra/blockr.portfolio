@@ -348,7 +348,12 @@ new_portfolio_dashboard_block <- function(
               )
             })
 
-            shiny::tagList(chart_tags)
+            # Resize echarts after DOM settles (fixes initial width)
+            resize_js <- shiny::tags$script(shiny::HTML(
+              "setTimeout(function(){window.dispatchEvent(new Event('resize'))}, 200);"
+            ))
+
+            shiny::tagList(chart_tags, resize_js)
           })
 
           # Return
