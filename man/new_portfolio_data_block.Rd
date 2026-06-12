@@ -13,17 +13,18 @@ new_portfolio_data_block(...)
 A data block of class \code{c("portfolio_data_block", "dm_block")}.
 }
 \description{
-A data block that returns a bundled dm object containing ETF metadata
-and monthly returns for portfolio analysis.
+Returns the bundled ETF universe as a \code{dm} object. Filters (distribution
+policy, TER, AUM, region, sector, theme) are applied downstream via a
+standard \code{\link[blockr.dm:new_dm_filter_block]{blockr.dm::new_dm_filter_block()}} wired to this block's output.
 }
 \details{
 The returned dm has two tables:
 \itemize{
-\item \code{metadata}: ticker, name, asset_class, region, sub_class
+\item \code{metadata}: ticker + descriptive columns (name, asset_class, region,
+region_tag, sector, theme, expense_ratio, distribution_policy,
+domicile, aum, type, …)
 \item \code{returns}: date, ticker, return (long format)
 }
-
-Primary key on \code{metadata.ticker}, foreign key from \code{returns.ticker}.
 }
 \examples{
 if (interactive()) {

@@ -11,11 +11,15 @@ new_investor_profile_block(
   currency = "USD",
   risk_slider = NULL,
   horizon_slider = NULL,
+  region_tilts = NULL,
+  sector_tilts = NULL,
   ...
 )
 }
 \arguments{
 \item{age}{Investor age (18-100), used to suggest risk/horizon defaults}
+
+\item{has_dependents}{Has kids or other dependents (suggested risk)}
 
 \item{amount}{Investment amount}
 
@@ -25,9 +29,13 @@ new_investor_profile_block(
 
 \item{horizon_slider}{Horizon preference 0-100 (NULL = derive from age)}
 
-\item{...}{Forwarded to \code{\link[blockr.core:new_data_block]{blockr.core::new_data_block()}}}
+\item{region_tilts}{Named integer vector of regional tilts (-2..+2).
+Defaults to all zeros. Names: us, europe, ch, em, asia_dev, japan.}
 
-\item{family}{Family status, used to suggest risk defaults}
+\item{sector_tilts}{Named integer vector of sector tilts (-2..+2).
+Defaults to all zeros. Names: tech, health, energy, financials, consumer.}
+
+\item{...}{Forwarded to \code{\link[blockr.core:new_data_block]{blockr.core::new_data_block()}}}
 }
 \value{
 A data block of class \code{investor_profile_block}
@@ -35,5 +43,13 @@ A data block of class \code{investor_profile_block}
 \description{
 A data block that captures investor preferences and outputs
 a one-row data frame with currency, risk (0-100), horizon (0-100),
-and investment amount.
+investment amount, and tilt columns for regional + sector preferences.
+}
+\details{
+Tilt columns are named \verb{tilt_<key>} and hold integer values in -2..+2:
+
+Regions: \code{tilt_us}, \code{tilt_europe}, \code{tilt_ch}, \code{tilt_em},
+\code{tilt_asia_dev}, \code{tilt_japan}.
+Sectors: \code{tilt_tech}, \code{tilt_health}, \code{tilt_energy},
+\code{tilt_financials}, \code{tilt_consumer}.
 }

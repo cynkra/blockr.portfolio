@@ -23,6 +23,7 @@ Imports:
     DT,
     echarts4r (>= 0.5.0),
     htmlwidgets,
+    jsonlite,
     PerformanceAnalytics,
     PortfolioAnalytics,
     quantmod,

@@ -2,14 +2,25 @@
 #'
 #' A data block that captures investor preferences and outputs
 #' a one-row data frame with currency, risk (0-100), horizon (0-100),
-#' and investment amount.
+#' investment amount, and tilt columns for regional + sector preferences.
+#'
+#' Tilt columns are named `tilt_<key>` and hold integer values in -2..+2:
+#'
+#' Regions: `tilt_us`, `tilt_europe`, `tilt_ch`, `tilt_em`,
+#'   `tilt_asia_dev`, `tilt_japan`.
+#' Sectors: `tilt_tech`, `tilt_health`, `tilt_energy`,
+#'   `tilt_financials`, `tilt_consumer`.
 #'
 #' @param age Investor age (18-100), used to suggest risk/horizon defaults
-#' @param family Family status, used to suggest risk defaults
+#' @param has_dependents Has kids or other dependents (suggested risk)
 #' @param amount Investment amount
 #' @param currency Base currency: "USD", "CHF", "EUR"
 #' @param risk_slider Risk preference 0-100 (NULL = derive from age/family)
 #' @param horizon_slider Horizon preference 0-100 (NULL = derive from age)
+#' @param region_tilts Named integer vector of regional tilts (-2..+2).
+#'   Defaults to all zeros. Names: us, europe, ch, em, asia_dev, japan.
+#' @param sector_tilts Named integer vector of sector tilts (-2..+2).
+#'   Defaults to all zeros. Names: tech, health, energy, financials, consumer.
 #' @param ... Forwarded to [blockr.core::new_data_block()]
 #'
 #' @return A data block of class `investor_profile_block`
@@ -21,11 +32,23 @@ new_investor_profile_block <- function(
     currency = "USD",
     risk_slider = NULL,
     horizon_slider = NULL,
+    region_tilts = NULL,
+    sector_tilts = NULL,
     ...) {
 
   init <- pf_derive_profile(age, has_dependents)
   if (is.null(risk_slider)) risk_slider <- init$risk_slider
   if (is.null(horizon_slider)) horizon_slider <- init$horizon_slider
+
+  region_defaults <- stats::setNames(
+    rep(0L, length(PF_REGION_KEYS)), PF_REGION_KEYS)
+  sector_defaults <- stats::setNames(
+    rep(0L, length(PF_SECTOR_KEYS)), PF_SECTOR_KEYS)
+
+  if (is.null(region_tilts)) region_tilts <- region_defaults
+  if (is.null(sector_tilts)) sector_tilts <- sector_defaults
+  region_tilts <- pf_normalize_tilts(region_tilts, region_defaults)
+  sector_tilts <- pf_normalize_tilts(sector_tilts, sector_defaults)
 
   blockr.core::new_data_block(
     server = function(id, data) {
@@ -38,8 +61,9 @@ new_investor_profile_block <- function(
           r_currency <- shiny::reactiveVal(currency)
           r_risk_slider <- shiny::reactiveVal(risk_slider)
           r_horizon_slider <- shiny::reactiveVal(horizon_slider)
+          r_region_tilts <- shiny::reactiveVal(region_tilts)
+          r_sector_tilts <- shiny::reactiveVal(sector_tilts)
 
-          # When demographics change, update sliders + suggestion markers
           shiny::observeEvent(
             list(r_age(), r_has_dependents()), {
               derived <- pf_derive_profile(
@@ -67,17 +91,103 @@ new_investor_profile_block <- function(
               currency = r_currency(msg$value),
               risk_slider = r_risk_slider(as.integer(msg$value)),
               horizon_slider = r_horizon_slider(
-                as.integer(msg$value))
+                as.integer(msg$value)),
+              add_tilt = {
+                # msg$value = "<axis>:<key>" (e.g. "region:us")
+                parts <- strsplit(msg$value, ":", fixed = TRUE)[[1]]
+                if (length(parts) != 2) return()
+                if (parts[1] == "region") {
+                  cur <- r_region_tilts()
+                  if (parts[2] %in% names(cur) &&
+                      cur[[parts[2]]] == 0L) {
+                    cur[[parts[2]]] <- 1L
+                    r_region_tilts(cur)
+                  }
+                } else if (parts[1] == "sector") {
+                  cur <- r_sector_tilts()
+                  if (parts[2] %in% names(cur) &&
+                      cur[[parts[2]]] == 0L) {
+                    cur[[parts[2]]] <- 1L
+                    r_sector_tilts(cur)
+                  }
+                }
+              },
+              set_tilt = {
+                # msg$axis, msg$key, msg$value
+                v <- max(-2L, min(2L, as.integer(msg$value)))
+                if (msg$axis == "region") {
+                  cur <- r_region_tilts()
+                  if (msg$key %in% names(cur)) {
+                    cur[[msg$key]] <- v
+                    r_region_tilts(cur)
+                  }
+                } else if (msg$axis == "sector") {
+                  cur <- r_sector_tilts()
+                  if (msg$key %in% names(cur)) {
+                    cur[[msg$key]] <- v
+                    r_sector_tilts(cur)
+                  }
+                }
+              },
+              remove_tilt = {
+                if (msg$axis == "region") {
+                  cur <- r_region_tilts()
+                  if (msg$key %in% names(cur)) {
+                    cur[[msg$key]] <- 0L
+                    r_region_tilts(cur)
+                  }
+                } else if (msg$axis == "sector") {
+                  cur <- r_sector_tilts()
+                  if (msg$key %in% names(cur)) {
+                    cur[[msg$key]] <- 0L
+                    r_sector_tilts(cur)
+                  }
+                }
+              },
+              reset_tilts = {
+                r_region_tilts(region_defaults)
+                r_sector_tilts(sector_defaults)
+              }
             )
+          })
+
+          # Active tilts list — rendered server-side so we can use R
+          # to compute which items are active and what the "add" menu
+          # should offer.
+          output$tilts_ui <- shiny::renderUI({
+            rt <- r_region_tilts()
+            st <- r_sector_tilts()
+            active_r <- names(rt)[rt != 0]
+            active_s <- names(st)[st != 0]
+            ip_render_tilt_list(session, rt, st)
+          })
+
+          output$tilts_add_menu <- shiny::renderUI({
+            rt <- r_region_tilts()
+            st <- r_sector_tilts()
+            ip_render_add_menu(session, rt, st)
           })
 
           list(
             expr = shiny::reactive({
+              rt <- r_region_tilts()
+              st <- r_sector_tilts()
               bquote(data.frame(
                 currency = .(r_currency()),
                 risk = .(r_risk_slider()),
                 horizon = .(r_horizon_slider()),
                 amount = .(r_amount()),
+                tilt_us = .(rt[["us"]]),
+                tilt_europe = .(rt[["europe"]]),
+                tilt_ch = .(rt[["ch"]]),
+                tilt_em = .(rt[["em"]]),
+                tilt_asia_dev = .(rt[["asia_dev"]]),
+                tilt_japan = .(rt[["japan"]]),
+                tilt_tech = .(st[["tech"]]),
+                tilt_health = .(st[["health"]]),
+                tilt_energy = .(st[["energy"]]),
+                tilt_financials = .(st[["financials"]]),
+                tilt_consumer = .(st[["consumer"]]),
                 stringsAsFactors = FALSE
               ))
             }),
@@ -87,7 +197,9 @@ new_investor_profile_block <- function(
               amount = r_amount,
               currency = r_currency,
               risk_slider = r_risk_slider,
-              horizon_slider = r_horizon_slider
+              horizon_slider = r_horizon_slider,
+              region_tilts = r_region_tilts,
+              sector_tilts = r_sector_tilts
             )
           )
         }
@@ -102,8 +214,6 @@ new_investor_profile_block <- function(
 
           # === Primary values ===
           shiny::div(class = "ip-section",
-
-            # Amount + Currency on one row
             shiny::div(class = "ip-row",
               shiny::div(class = "ip-group ip-flex1",
                 shiny::div(class = "ip-label", "Investment Amount"),
@@ -117,17 +227,12 @@ new_investor_profile_block <- function(
               shiny::div(class = "ip-group",
                 shiny::div(class = "ip-label", "Currency"),
                 shiny::div(class = "ip-radios",
-                  ip_radio_chip(ns, "currency", "USD", "USD",
-                    currency),
-                  ip_radio_chip(ns, "currency", "CHF", "CHF",
-                    currency),
-                  ip_radio_chip(ns, "currency", "EUR", "EUR",
-                    currency)
+                  ip_radio_chip(ns, "currency", "USD", "USD", currency),
+                  ip_radio_chip(ns, "currency", "CHF", "CHF", currency),
+                  ip_radio_chip(ns, "currency", "EUR", "EUR", currency)
                 )
               )
             ),
-
-            # Risk appetite slider
             shiny::div(class = "ip-slider-group",
               shiny::div(class = "ip-slider-header",
                 shiny::span(class = "ip-label", "Risk Appetite"),
@@ -142,7 +247,6 @@ new_investor_profile_block <- function(
                   `data-param` = "risk_slider",
                   min = 0, max = 100, value = risk_slider, step = 1
                 ),
-                # Suggestion marker (positioned via JS)
                 shiny::div(class = "ip-suggest-marker",
                   id = ns("risk_suggest"),
                   title = "Suggested based on demographics"
@@ -154,12 +258,9 @@ new_investor_profile_block <- function(
                 shiny::span("Aggressive")
               )
             ),
-
-            # Horizon slider
             shiny::div(class = "ip-slider-group",
               shiny::div(class = "ip-slider-header",
-                shiny::span(class = "ip-label",
-                  "Investment Horizon"),
+                shiny::span(class = "ip-label", "Investment Horizon"),
                 shiny::span(class = "ip-slider-value",
                   id = ns("horizon_label"),
                   pf_horizon_label(horizon_slider))
@@ -169,8 +270,7 @@ new_investor_profile_block <- function(
                   type = "range", class = "ip-slider",
                   id = ns("horizon_slider"),
                   `data-param` = "horizon_slider",
-                  min = 0, max = 100, value = horizon_slider,
-                  step = 1
+                  min = 0, max = 100, value = horizon_slider, step = 1
                 ),
                 shiny::div(class = "ip-suggest-marker",
                   id = ns("horizon_suggest"),
@@ -208,10 +308,23 @@ new_investor_profile_block <- function(
                 shiny::span("Dependents")
               )
             )
+          ),
+
+          # === Preferences ===
+          shiny::div(class = "ip-prefs", id = ns("ip_prefs"),
+            shiny::div(class = "ip-prefs-header",
+              shiny::span(class = "ip-label", "Preferences"),
+              shiny::tags$button(class = "ip-prefs-reset",
+                `data-param` = "reset_tilts",
+                "Reset")
+            ),
+            shiny::div(class = "ip-prefs-add",
+              shiny::uiOutput(ns("tilts_add_menu"), inline = FALSE)
+            ),
+            shiny::uiOutput(ns("tilts_ui"), inline = FALSE)
           )
         ),
 
-        # Client-side JS
         shiny::tags$script(shiny::HTML(paste0("
           $(function() {
             var layoutId = '", ns("ip_layout"), "';
@@ -221,6 +334,7 @@ new_investor_profile_block <- function(
             var riskSuggestId = '", ns("risk_suggest"), "';
             var horizonSuggestId = '", ns("horizon_suggest"), "';
             var syncMsgId = '", ns("sync_sliders"), "';
+            var prefsId = '", ns("ip_prefs"), "';
             var debounceTimer = null;
 
             function riskLabel(v) {
@@ -242,7 +356,6 @@ new_investor_profile_block <- function(
               var $marker = $('#' + markerId);
               if (!$marker.length) return;
               $marker.css('left', value + '%');
-              // Hide marker if it matches the slider position
               var $slider = $marker.siblings('.ip-slider');
               if ($slider.length && parseInt($slider.val()) === value) {
                 $marker.addClass('ip-hidden');
@@ -250,8 +363,6 @@ new_investor_profile_block <- function(
                 $marker.removeClass('ip-hidden');
               }
             }
-
-            // Initial marker positions
             positionMarker(riskSuggestId, ", risk_slider, ");
             positionMarker(horizonSuggestId, ", horizon_slider, ");
 
@@ -265,46 +376,35 @@ new_investor_profile_block <- function(
                 value: $(this).data('value')
               }, {priority: 'event'});
             });
-
-            // Numeric input change (amount)
-            $(document).on('change', '#' + layoutId + ' .ip-numeric', function(e) {
+            $(document).on('change', '#' + layoutId + ' .ip-numeric', function() {
               Shiny.setInputValue(ctrlId, {
                 param: $(this).data('param'),
                 value: $(this).val()
               }, {priority: 'event'});
             });
-
-            // Demographics: age input (continuous update)
-            $(document).on('input', '#' + layoutId + ' .ip-demo-input', function(e) {
+            $(document).on('input', '#' + layoutId + ' .ip-demo-input', function() {
               Shiny.setInputValue(ctrlId, {
                 param: $(this).data('param'),
                 value: $(this).val()
               }, {priority: 'event'});
             });
-
-            // Demographics: dependents checkbox
-            $(document).on('change', '#' + layoutId + ' .ip-demo-checkbox', function(e) {
+            $(document).on('change', '#' + layoutId + ' .ip-demo-checkbox', function() {
               Shiny.setInputValue(ctrlId, {
                 param: $(this).data('param'),
                 value: $(this).is(':checked')
               }, {priority: 'event'});
             });
-
-            // Slider input (debounced)
-            $(document).on('input', '#' + layoutId + ' .ip-slider', function(e) {
+            $(document).on('input', '#' + layoutId + ' .ip-slider', function() {
               var param = $(this).data('param');
               var value = parseInt($(this).val());
               if (param === 'risk_slider') {
                 $('#' + riskLabelId).text(riskLabel(value));
-                positionMarker(riskSuggestId, parseInt($('#' + riskSuggestId).css('left')) || 0);
               } else if (param === 'horizon_slider') {
                 $('#' + horizonLabelId).text(horizonLabel(value));
               }
-              // Hide/show marker based on match
               var $marker = $(this).siblings('.ip-suggest-marker');
               var markerPos = parseFloat($marker.css('left')) / $(this).width() * 100;
               $marker.toggleClass('ip-hidden', Math.abs(value - markerPos) < 3);
-
               clearTimeout(debounceTimer);
               debounceTimer = setTimeout(function() {
                 Shiny.setInputValue(ctrlId, {
@@ -313,35 +413,97 @@ new_investor_profile_block <- function(
               }, 200);
             });
 
-            // Sync sliders + suggestion markers from server
+            // === Preferences ===
+            // Add-dropdown change → add_tilt
+            $(document).on('change', '#' + prefsId + ' .ip-tilt-add-select', function() {
+              var v = $(this).val();
+              if (!v) return;
+              Shiny.setInputValue(ctrlId, {
+                param: 'add_tilt',
+                value: v
+              }, {priority: 'event'});
+              $(this).val('');
+            });
+            // Tilt row slider change → set_tilt (debounced)
+            var tiltDebounce = null;
+            $(document).on('input', '#' + prefsId + ' .ip-tilt-slider', function() {
+              var axis = $(this).data('axis');
+              var key = $(this).data('key');
+              var value = parseInt($(this).val());
+              var $row = $(this).closest('.ip-tilt-row');
+              $row.find('.ip-tilt-val').text(value > 0 ? '+' + value : '' + value)
+                .removeClass('pos neg neu')
+                .addClass(value > 0 ? 'pos' : (value < 0 ? 'neg' : 'neu'));
+              clearTimeout(tiltDebounce);
+              tiltDebounce = setTimeout(function() {
+                Shiny.setInputValue(ctrlId, {
+                  param: 'set_tilt',
+                  axis: axis, key: key, value: value
+                }, {priority: 'event'});
+              }, 150);
+            });
+            // Remove button
+            $(document).on('click', '#' + prefsId + ' .ip-tilt-remove', function(e) {
+              e.stopPropagation();
+              Shiny.setInputValue(ctrlId, {
+                param: 'remove_tilt',
+                axis: $(this).data('axis'),
+                key: $(this).data('key')
+              }, {priority: 'event'});
+            });
+            // Reset
+            $(document).on('click', '#' + prefsId + ' .ip-prefs-reset', function() {
+              Shiny.setInputValue(ctrlId, {
+                param: 'reset_tilts',
+                value: 'true'
+              }, {priority: 'event'});
+            });
+
+            // Slider sync
             Shiny.addCustomMessageHandler(syncMsgId, function(msg) {
               var $layout = $('#' + layoutId);
               if (msg.risk !== undefined) {
-                var $risk = $layout.find('.ip-slider[data-param=risk_slider]');
-                $risk.val(msg.risk);
+                $layout.find('.ip-slider[data-param=risk_slider]').val(msg.risk);
                 $('#' + riskLabelId).text(riskLabel(msg.risk));
               }
               if (msg.horizon !== undefined) {
-                var $horizon = $layout.find('.ip-slider[data-param=horizon_slider]');
-                $horizon.val(msg.horizon);
+                $layout.find('.ip-slider[data-param=horizon_slider]').val(msg.horizon);
                 $('#' + horizonLabelId).text(horizonLabel(msg.horizon));
               }
-              if (msg.suggest_risk !== undefined) {
+              if (msg.suggest_risk !== undefined)
                 positionMarker(riskSuggestId, msg.suggest_risk);
-              }
-              if (msg.suggest_horizon !== undefined) {
+              if (msg.suggest_horizon !== undefined)
                 positionMarker(horizonSuggestId, msg.suggest_horizon);
-              }
             });
           });
         ")))
       )
     },
     external_ctrl = c("age", "has_dependents", "amount", "currency",
-      "risk_slider", "horizon_slider"),
+      "risk_slider", "horizon_slider",
+      "region_tilts", "sector_tilts"),
     class = "investor_profile_block",
     ...
   )
+}
+
+# -- Tilt constants ------------------------------------------------------------
+
+PF_REGION_KEYS <- c("us", "europe", "ch", "em", "asia_dev", "japan")
+PF_REGION_LABELS <- c("US", "Europe", "Switzerland", "Emerging",
+  "Asia-Developed", "Japan")
+PF_SECTOR_KEYS <- c("tech", "health", "energy", "financials", "consumer")
+PF_SECTOR_LABELS <- c("Technology", "Healthcare", "Energy",
+  "Financials", "Consumer")
+
+# -- Helpers -------------------------------------------------------------------
+
+pf_normalize_tilts <- function(x, defaults) {
+  out <- defaults
+  x <- as.integer(x)
+  keys <- intersect(names(x), names(out))
+  if (length(keys)) out[keys] <- pmax(-2L, pmin(2L, x[keys]))
+  out
 }
 
 # -- UI helpers ----------------------------------------------------------------
@@ -353,6 +515,78 @@ ip_radio_chip <- function(ns, param, value, label, current) {
     `data-param` = param,
     `data-value` = value,
     label
+  )
+}
+
+ip_render_add_menu <- function(session, region_tilts, sector_tilts) {
+  # Build dropdown offering only items not currently tilted
+  available_r <- names(region_tilts)[region_tilts == 0]
+  available_s <- names(sector_tilts)[sector_tilts == 0]
+
+  region_opts <- lapply(available_r, function(k) {
+    i <- match(k, PF_REGION_KEYS)
+    shiny::tags$option(value = paste0("region:", k),
+      PF_REGION_LABELS[i])
+  })
+  sector_opts <- lapply(available_s, function(k) {
+    i <- match(k, PF_SECTOR_KEYS)
+    shiny::tags$option(value = paste0("sector:", k),
+      PF_SECTOR_LABELS[i])
+  })
+
+  empty <- length(available_r) == 0 && length(available_s) == 0
+  shiny::tags$select(class = "ip-tilt-add-select",
+    disabled = if (empty) NA else NULL,
+    shiny::tags$option(value = "",
+      if (empty) "All preferences added"
+      else "+ Add preference\u2026"),
+    if (length(region_opts))
+      shiny::tags$optgroup(label = "Regions", region_opts),
+    if (length(sector_opts))
+      shiny::tags$optgroup(label = "Sectors", sector_opts)
+  )
+}
+
+ip_render_tilt_list <- function(session, region_tilts, sector_tilts) {
+  rows <- list()
+  for (k in PF_REGION_KEYS) {
+    v <- region_tilts[[k]]
+    if (v != 0)
+      rows <- c(rows, list(ip_tilt_row("region", k,
+        PF_REGION_LABELS[match(k, PF_REGION_KEYS)], v)))
+  }
+  for (k in PF_SECTOR_KEYS) {
+    v <- sector_tilts[[k]]
+    if (v != 0)
+      rows <- c(rows, list(ip_tilt_row("sector", k,
+        PF_SECTOR_LABELS[match(k, PF_SECTOR_KEYS)], v)))
+  }
+  if (length(rows) == 0) {
+    return(shiny::div(class = "ip-tilt-empty",
+      "No preferences set"))
+  }
+  shiny::div(class = "ip-tilt-list", rows)
+}
+
+ip_tilt_row <- function(axis, key, label, value) {
+  vlab <- if (value > 0) paste0("+", value) else as.character(value)
+  vclass <- if (value > 0) "pos" else if (value < 0) "neg" else "neu"
+  shiny::div(class = "ip-tilt-row",
+    `data-axis` = axis, `data-key` = key,
+    shiny::div(class = "ip-tilt-name", label),
+    shiny::div(class = "ip-tilt-slider-wrap",
+      shiny::tags$input(type = "range", class = "ip-tilt-slider",
+        `data-axis` = axis, `data-key` = key,
+        min = -2, max = 2, step = 1, value = value),
+      shiny::div(class = "ip-tilt-ticks",
+        shiny::span(), shiny::span(), shiny::span(),
+        shiny::span(), shiny::span())
+    ),
+    shiny::div(class = paste("ip-tilt-val", vclass), vlab),
+    shiny::tags$button(class = "ip-tilt-remove",
+      `data-axis` = axis, `data-key` = key,
+      title = "Remove",
+      shiny::HTML("&times;"))
   )
 }
 
@@ -380,7 +614,6 @@ ip_css <- function() {
   .ip-radio.is-active { background: #dbeafe; border-color: #93c5fd;
     color: #1d4ed8; font-weight: 500; }
 
-  /* Slider */
   .ip-slider-group { margin-bottom: 14px; }
   .ip-slider-header { display: flex; justify-content: space-between;
     align-items: baseline; margin-bottom: 6px; }
@@ -400,19 +633,15 @@ ip_css <- function() {
   .ip-slider-ticks { display: flex; justify-content: space-between;
     margin-top: 4px; font-size: 10px; color: #9ca3af; }
 
-  /* Suggestion marker */
-  .ip-suggest-marker {
-    position: absolute; top: 50%; transform: translate(-50%, -50%);
-    width: 0; height: 0;
+  .ip-suggest-marker { position: absolute; top: 50%;
+    transform: translate(-50%, -50%); width: 0; height: 0;
     border-left: 5px solid transparent;
     border-right: 5px solid transparent;
     border-top: 7px solid #f59e0b;
     z-index: 1; pointer-events: none;
-    transition: left 0.3s ease;
-  }
+    transition: left 0.3s ease; }
   .ip-suggest-marker.ip-hidden { display: none; }
 
-  /* Demographics helper */
   .ip-demographics { border-top: 1px solid #e5e7eb; margin-top: 8px;
     padding-top: 10px; }
   .ip-demo-label { font-size: 10px; font-weight: 500; color: #9ca3af;
@@ -431,7 +660,66 @@ ip_css <- function() {
   .ip-demo-checkbox { width: 13px; height: 13px; cursor: pointer;
     accent-color: #3b82f6; }
   .ip-hidden { display: none !important; }
+
+  /* Preferences */
+  .ip-prefs { border-top: 1px solid #e5e7eb; margin-top: 14px;
+    padding-top: 12px; }
+  .ip-prefs-header { display: flex; justify-content: space-between;
+    align-items: center; margin-bottom: 8px; }
+  .ip-prefs-reset { padding: 2px 10px; font-size: 11px;
+    border: 1px solid #d1d5db; background: #fff; color: #6b7280;
+    border-radius: 4px; cursor: pointer; font-family: inherit; }
+  .ip-prefs-reset:hover { background: #f3f4f6; color: #374151; }
+  .ip-prefs-add { margin-bottom: 8px; }
+  .ip-tilt-add-select { width: 100%; padding: 6px 10px;
+    border: 1px dashed #d1d5db; border-radius: 6px;
+    background: #fff; color: #6b7280;
+    font-size: 13px; font-family: inherit; cursor: pointer;
+    transition: all 0.15s; }
+  .ip-tilt-add-select:hover:not(:disabled) { border-color: #93c5fd;
+    color: #374151; background: #f9fafb; }
+  .ip-tilt-add-select:focus { outline: none; border-color: #3b82f6;
+    border-style: solid; }
+  .ip-tilt-add-select:disabled { cursor: not-allowed; opacity: 0.6; }
+
+  .ip-tilt-empty { font-size: 12px; color: #9ca3af;
+    font-style: italic; padding: 8px 4px; text-align: center;
+    border-radius: 6px; background: #f9fafb; }
+  .ip-tilt-list { display: flex; flex-direction: column; gap: 6px; }
+  .ip-tilt-row { display: grid;
+    grid-template-columns: 100px 1fr 42px 24px;
+    align-items: center; gap: 8px; padding: 4px 0; }
+  .ip-tilt-name { font-size: 13px; color: #374151;
+    font-weight: 500; overflow: hidden; text-overflow: ellipsis;
+    white-space: nowrap; }
+  .ip-tilt-slider-wrap { position: relative; padding: 2px 0; }
+  .ip-tilt-slider { width: 100%; -webkit-appearance: none;
+    appearance: none; height: 5px; border-radius: 3px;
+    background: linear-gradient(90deg,
+      #fca5a5 0%, #fca5a5 22%, #fecaca 22%, #fecaca 45%,
+      #e5e7eb 45%, #e5e7eb 55%,
+      #bbf7d0 55%, #bbf7d0 78%, #86efac 78%, #86efac 100%);
+    outline: none; cursor: pointer; }
+  .ip-tilt-slider::-webkit-slider-thumb { -webkit-appearance: none;
+    width: 14px; height: 14px; border-radius: 50%;
+    background: #fff; border: 2px solid #3b82f6;
+    cursor: pointer; box-shadow: 0 1px 2px rgba(0,0,0,0.15); }
+  .ip-tilt-slider::-moz-range-thumb { width: 14px; height: 14px;
+    border-radius: 50%; background: #fff;
+    border: 2px solid #3b82f6; cursor: pointer; }
+  .ip-tilt-ticks { display: flex; justify-content: space-between;
+    margin-top: 2px; pointer-events: none; }
+  .ip-tilt-ticks span { display: block; width: 3px; height: 3px;
+    border-radius: 50%; background: #d1d5db; }
+  .ip-tilt-val { font-size: 12px; font-weight: 600;
+    text-align: center; padding: 2px 0; border-radius: 4px; }
+  .ip-tilt-val.pos { color: #166534; background: #dcfce7; }
+  .ip-tilt-val.neg { color: #991b1b; background: #fee2e2; }
+  .ip-tilt-val.neu { color: #6b7280; background: #f3f4f6; }
+  .ip-tilt-remove { width: 22px; height: 22px; padding: 0;
+    border: none; background: transparent; color: #9ca3af;
+    font-size: 18px; line-height: 1; cursor: pointer;
+    border-radius: 4px; transition: all 0.15s; font-family: inherit; }
+  .ip-tilt-remove:hover { background: #fee2e2; color: #991b1b; }
   "
 }
-
-# S3 methods: use default data_block output (html_table_preview via blockr.extra)
