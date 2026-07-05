@@ -1,7 +1,13 @@
 # blockr.portfolio
 
 <!-- badges: start -->
+![Status: experimental](https://img.shields.io/badge/status-experimental-orange)
 <!-- badges: end -->
+
+> [!WARNING]
+> **Experimental.** This package is an early prototype and will change a
+> lot — blocks, APIs, and bundled data may break without notice. Do not
+> rely on it for anything.
 
 Portfolio management and share exploration blocks for
 [blockr](https://blockr-org.github.io/blockr.site/). Extends
