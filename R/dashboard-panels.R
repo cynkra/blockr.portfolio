@@ -225,10 +225,19 @@ frontier_panel <- function() {
         )))
       }
 
-      # Portfolio position
-      if (!is.null(results$backtest)) {
-        port_risk <- results$backtest$ann_vol * 100
-        port_ret <- results$backtest$ann_return * 100
+      # Portfolio position. Plot it on the SAME arithmetic-annualized basis as
+      # the frontier and the assets (mean * 12, sd * sqrt(12)) so a convex
+      # combination of assets lands inside the frontier envelope. The KPI tiles
+      # keep the geometric `ann_return` / `ann_vol` — those are the correct
+      # headline performance figures, but they live on a different (compounded)
+      # scale that does not belong on this mean-variance chart.
+      pr <- if (!is.null(results$backtest)) {
+        as.numeric(results$backtest$returns)
+      } else NULL
+      pr <- pr[is.finite(pr)]
+      if (length(pr) > 1) {
+        port_risk <- stats::sd(pr, na.rm = TRUE) * sqrt(12) * 100
+        port_ret <- mean(pr, na.rm = TRUE) * 12 * 100
         series <- c(series, list(list(
           type = "effectScatter",
           name = "Portfolio",

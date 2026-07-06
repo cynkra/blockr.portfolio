@@ -435,10 +435,13 @@ pf_efficient_frontier <- function(returns_xts, constraints) {
     ))
   }
 
+  # PortfolioAnalytics reports the frontier in the return series' native
+  # (monthly) units. Annualize to match the assets and the portfolio point so
+  # all three sit on the same "annualized %" axes: mean * 12, StdDev * sqrt(12).
   list(
     frontier = data.frame(
-      risk = ef$frontier[, "StdDev"],
-      return = ef$frontier[, "mean"]
+      risk = ef$frontier[, "StdDev"] * sqrt(12),
+      return = ef$frontier[, "mean"] * 12
     ),
     assets = data.frame(
       ticker = funds,

@@ -51,7 +51,7 @@ new_investor_profile_block <- function(
   sector_tilts <- pf_normalize_tilts(sector_tilts, sector_defaults)
 
   blockr.core::new_data_block(
-    server = function(id, data) {
+    server = function(id) {
       shiny::moduleServer(
         id,
         function(input, output, session) {
@@ -482,6 +482,10 @@ new_investor_profile_block <- function(
     external_ctrl = c("age", "has_dependents", "amount", "currency",
       "risk_slider", "horizon_slider",
       "region_tilts", "sector_tilts"),
+    # User inputs (sliders/tilts) may be cleared/repopulated from JS after
+    # load; relax the readiness requirement on user state so a transient empty
+    # value never wedges the block (defensive; all defaults are non-empty).
+    allow_empty_state = TRUE,
     class = "investor_profile_block",
     ...
   )

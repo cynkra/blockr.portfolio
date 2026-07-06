@@ -39,7 +39,7 @@ new_ticker_data_block <- function(
   })
 
   blockr.core::new_data_block(
-    server = function(id, data) {
+    server = function(id) {
       shiny::moduleServer(
         id,
         function(input, output, session) {
@@ -207,6 +207,10 @@ new_ticker_data_block <- function(
       )
     },
     external_ctrl = c("tickers", "from", "to", "periodicity"),
+    # User inputs (ticker selection etc.) populate from JS after load; relax
+    # the readiness requirement so a transient empty selection never wedges the
+    # block (defensive; all defaults are non-empty).
+    allow_empty_state = TRUE,
     class = "ticker_data_block",
     ...
   )
