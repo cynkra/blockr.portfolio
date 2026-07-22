@@ -101,19 +101,17 @@ board <- blockr.dock::new_dock_board(
     blockr.dag::new_dag_extension()
   ),
 
-  layouts = list(
+  grids = list(
     # Advisor cockpit: settings LEFT (narrow), dashboard RIGHT (wide). The left
     # column stacks the investor profile on top with the optimizer strategy
     # below it (a nested `list()` flips orientation to vertical).
-    Advisor = dock_layout(
+    Advisor = dock_grid(
       list("profile", "optimizer"),
       "dashboard",
-      orientation = "horizontal", sizes = c(1, 2.2),
-      name = "Advisor"),
+      orientation = "horizontal", sizes = c(1, 2.2)),
     # Workflow: the live block graph, blocks grouped into coloured stacks.
-    Workflow = dock_layout(
-      "ext_panel-dag_extension",
-      name = "Workflow")
+    Workflow = dock_grid(
+      "ext_panel-dag_extension")
   ),
   active = "Advisor"
 )

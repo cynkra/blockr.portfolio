@@ -88,18 +88,16 @@ board <- blockr.dock::new_dock_board(
     blockr.dag::new_dag_extension()
   ),
 
-  layouts = list(
+  grids = list(
     # Explorer cockpit: ticker / date selection LEFT (narrow), the share
     # explorer RIGHT (wide).
-    Explorer = dock_layout(
+    Explorer = dock_grid(
       "data",
       "explorer",
-      orientation = "horizontal", sizes = c(1, 2.5),
-      name = "Explorer"),
+      orientation = "horizontal", sizes = c(1, 2.5)),
     # Workflow: the live block graph.
-    Workflow = dock_layout(
-      "ext_panel-dag_extension",
-      name = "Workflow")
+    Workflow = dock_grid(
+      "ext_panel-dag_extension")
   ),
   active = "Explorer"
 )
