@@ -53,7 +53,7 @@ unregister_blocks(core_drop)
 
 options(
   blockr.eval_parent_env = asNamespace("stats"),
-  blockr.html_table_preview = TRUE,
+  blockr.tabular_display = blockr.ui::html_table_display,
   blockr.lazy_eval = FALSE,
   blockr.dock_is_locked = FALSE
 )
