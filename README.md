@@ -10,7 +10,7 @@
 > rely on it for anything.
 
 Portfolio management and share exploration blocks for
-[blockr](https://blockr-org.github.io/blockr.site/). Extends
+[blockr](https://blockr.site). Extends
 `blockr.core` with an investor-profile block, a portfolio optimizer, a
 rich analysis dashboard, and a share explorer with candlestick charts.
 All visualizations use [echarts4r](https://echarts4r.john-coene.com/).
