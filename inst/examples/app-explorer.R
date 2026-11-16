@@ -85,7 +85,7 @@ board <- blockr.dock::new_dock_board(
   ),
 
   extensions = list(
-    blockr.dag::new_dag_extension()
+    dag = blockr.dag::new_dag_extension()
   ),
 
   grids = list(
@@ -95,9 +95,12 @@ board <- blockr.dock::new_dock_board(
       "data",
       "explorer",
       orientation = "horizontal", sizes = c(1, 2.5)),
-    # Workflow: the live block graph.
+    # Workflow: the live block graph. Address the extension by the key it is
+    # mounted under via ext(), not "ext_panel-dag_extension": since blockr.dock
+    # made extension ids container-owned, the class-derived name resolves to
+    # nothing and the board aborts with "Layout references unknown panel".
     Workflow = dock_grid(
-      "ext_panel-dag_extension")
+      ext("dag"))
   ),
   active = "Explorer"
 )
