@@ -25,7 +25,6 @@ blockr_pkgs <- c(
   "blockr.core",
   "blockr.dock",
   "blockr.dplyr",
-  "blockr.extra",
   "blockr.dag",
   "blockr.session",
   "blockr.portfolio"

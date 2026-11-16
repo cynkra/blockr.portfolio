@@ -21,7 +21,6 @@ if (!exists("dev_local")) dev_local <- FALSE
 blockr_pkgs <- c(
   "blockr.core",
   "blockr.dock",
-  "blockr.extra",
   "blockr.dag",
   "blockr.session",
   "blockr.portfolio"
